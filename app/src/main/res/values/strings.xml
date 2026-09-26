@@ -150,6 +150,7 @@
     <string name="login_command_hint">e.g. cd /var/www &amp;&amp; ls</string>
 
     <!-- 终端 -->
+    <string name="session_connect_failed">Connection failed</string>
     <string name="session_ended">Session ended</string>
     <string name="reconnect">Reconnect</string>
     <string name="offline">offline</string>
@@ -194,7 +195,6 @@
     <string name="cursor_bar">Bar</string>
     <string name="cursor_blink">Cursor blink</string>
     <string name="reset_done">Reset to defaults</string>
-    <string name="undo">Undo</string>
     <string name="fallback_none">None (system default)</string>
 
     <!-- 字体能力标签 -->
@@ -294,7 +294,7 @@
 
     <!-- 传输层（终端内提示，换行 \r\n 由代码补） -->
     <string name="ssh_via_jump">[moke] Connecting via jump host %1$s…</string>
-    <string name="ssh_connect_failed">[SSH failed: %1$s]</string>
+    <string name="ssh_connection_lost">[SSH connection lost: %1$s]</string>
     <string name="startup_command_exited">[moke] startup command \"%1$s\" exited with %2$d</string>
     <string name="mosh_unavailable">[mosh unavailable] This build has no bundled mosh native component (arm64-v8a only). Use SSH instead, or install a build with mosh.</string>
     <string name="mosh_bootstrapping">[moke] Bootstrapping mosh-server over SSH…</string>
@@ -413,4 +413,47 @@
     <string name="font_zip_entry_missing">No ttf matching \'%1$s\' inside the archive</string>
     <string name="font_read_failed">Cannot read the selected file</string>
     <string name="font_invalid">Not a valid font file (TTF / OTF required)</string>
+    <!-- Confirmations for destructive actions -->
+    <string name="host_delete_title">Delete host</string>
+    <string name="host_delete_confirm">Delete “%1$s”?
+Its saved password / private key and host fingerprint are removed too. This can\'t be undone.</string>
+    <string name="sessions_clear_ended_title">Clear ended sessions</string>
+    <string name="sessions_clear_ended_confirm">Clear %1$d ended sessions? Their terminal output is discarded.</string>
+    <string name="action_clear">Clear</string>
+    <string name="font_delete_title">Delete font</string>
+    <string name="font_delete_confirm">Delete “%1$s”? You\'ll need to download or import it again to use it.</string>
+    <string name="hostkey_clear_confirm">Clear the saved fingerprint for %1$s? You\'ll be asked to confirm the fingerprint again on the next connection.</string>
+    <string name="action_clear_fingerprint">Clear</string>
+    <string name="reset_default_confirm">Reset all appearance settings to their defaults? Your current font, color scheme, size and cursor settings will be replaced.</string>
+    <!-- 终端链接操作条 -->
+    <string name="link_open">Open</string>
+    <string name="link_copied">Link copied</string>
+    <string name="link_open_failed">No app can open this link</string>
+    <!-- 端口转发 -->
+    <string name="fwd_title">Port forwarding</string>
+    <string name="fwd_add">Add</string>
+    <string name="fwd_add_title">Add port forward</string>
+    <string name="fwd_hint">Forward a port on the remote machine to this phone and open it in a browser — handy for things like a remote dev server with no public address. Listens on this phone only; other devices on your network can\'t reach it.</string>
+    <string name="fwd_empty">No forwards yet. Tap Add, or tap a localhost link in the terminal.</string>
+    <string name="fwd_connecting">Remote %1$d · connecting…</string>
+    <string name="fwd_row_remote">Remote %1$d</string>
+    <string name="fwd_failed">Disconnected</string>
+    <string name="fwd_copy_address">Copy address</string>
+    <string name="fwd_stop">Stop</string>
+    <string name="fwd_remote_port">Remote port</string>
+    <string name="fwd_local_port">Local port (optional)</string>
+    <string name="fwd_local_port_hint">Leave empty to pick automatically</string>
+    <string name="fwd_local_port_invalid">Enter 1024–65535, or leave empty</string>
+    <string name="fwd_open_failed">Forwarding failed: couldn\'t forward remote port %1$d</string>
+    <string name="link_forward_open">Forward &amp; open</string>
+    <string name="menu_port_forward">Port forwarding</string>
+    <string name="field_forward_ports">Ports to forward on connect (optional)</string>
+    <string name="field_forward_ports_hint">e.g. 5173, 8080 — set up automatically after connecting; see them in the terminal\'s port forwarding panel</string>
+    <string name="field_forward_ports_invalid">Not recognized: %1$s</string>
+    <!-- 终端提醒 -->
+    <string name="alert_bell">The terminal rang the bell</string>
+    <string name="alert_channel_name">Terminal alerts</string>
+    <string name="alert_channel_desc">When a remote program rings the bell or sends a notification</string>
+    <string name="menu_terminal_alerts">Bell &amp; notification alerts</string>
+    <string name="menu_terminal_alerts_sub">When a remote program rings the bell or sends a notification sequence (OSC 9 / 777) while you\'re not in that session, show a system notification</string>
 </resources>

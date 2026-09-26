@@ -59,6 +59,7 @@ class SettingsStore(private val context: Context) {
     private val keepScreenOnKey = booleanPreferencesKey("keep_screen_on")
     // 首次连接一台新主机时，是否直接信任它的主机密钥（不弹确认）。
     private val autoTrustNewHostKeyKey = booleanPreferencesKey("auto_trust_new_host_key")
+    private val terminalAlertsKey = booleanPreferencesKey("terminal_alerts")
     // 静默检查更新：上次检查时间戳 + 已知的最新版本 tag 与其发布页地址（用于跨启动保留"有更新"小圆点与跳转目标）。
     private val lastUpdateCheckKey = androidx.datastore.preferences.core.longPreferencesKey("last_update_check_at")
     private val latestSeenTagKey = stringPreferencesKey("latest_seen_tag")
@@ -343,6 +344,13 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setAutoTrustNewHostKey(on: Boolean) {
         context.settingsDataStore.edit { it[autoTrustNewHostKeyKey] = on }
+    }
+
+    /** 响铃与通知提醒：默认关闭（通用终端能力，按需开启）。 */
+    val terminalAlerts: Flow<Boolean> = context.settingsDataStore.data.map { prefs -> prefs[terminalAlertsKey] ?: false }
+
+    suspend fun setTerminalAlerts(on: Boolean) {
+        context.settingsDataStore.edit { it[terminalAlertsKey] = on }
     }
 
     /** 记录一次静默检查的结果（[tag] 为空表示已是最新）。 */

@@ -129,11 +129,27 @@ public class TerminalSession extends TerminalOutput {
             mTransport.start(this, columns, rows, cellWidthPixels, cellHeightPixels);
         } catch (Exception e) {
             Logger.logStackTraceWithMessage(mClient, LOG_TAG, "transport start failed", e);
-            String msg = "\r\n" + statusText.connectFailed(String.valueOf(e.getMessage())) + "\r\n";
-            byte[] b = msg.getBytes(StandardCharsets.UTF_8);
-            processToEmulator(b, b.length);
-            onTransportFinished(1);
+            onTransportConnectFailed(String.valueOf(e.getMessage()));
         }
+    }
+
+    /**
+     * [moke] 传输在**连接建立之前**失败时调用（任意线程）：写一行连接失败文案并结束会话。
+     *
+     * <p>与连上之后才断开（{@link #onTransportFinished}）分开上报：产品层据此区分"连不上"
+     * 和"会话结束"，前者要给出改配置的出路。异步建连的传输（SSH / mosh 引导都在后台线程里连）
+     * 失败时也必须走这里，而不是自己写一句再按普通结束上报。
+     *
+     * @param reason 失败原因；传 null 表示传输已自行写出更具体的说明，这里只上报、不再追加一行。
+     */
+    public void onTransportConnectFailed(String reason) {
+        StatusText text = sessionStatusText != null ? sessionStatusText : statusText;
+        String line = text.connectFailed(reason == null ? "" : reason);
+        if (reason != null) {
+            byte[] b = ("\r\n" + line + "\r\n").getBytes(StandardCharsets.UTF_8);
+            processToEmulator(b, b.length);
+        }
+        onTransportFinished(1);
     }
 
     /** 传输层收到远端字节后调用（任意线程）：入队并通知主线程喂给 emulator。 */
@@ -247,6 +263,11 @@ public class TerminalSession extends TerminalOutput {
     @Override
     public void onBell() {
         if (mClient != null) mClient.onBell(this);
+    }
+
+    @Override
+    public void onNotification(String title, String body) {
+        if (mClient != null) mClient.onNotification(this, title, body);
     }
 
     @Override

@@ -24,9 +24,10 @@ class MokeHostKeyVerifier(
 
     override fun verify(hostname: String, port: Int, key: PublicKey): Boolean {
         val id = "$hostname:$port"
-        val fp = known.fingerprint(key)
-        return when (val saved = known.stored(id)) {
-            null -> {
+        val fp = HostKeyFingerprint.of(key)
+        val saved = known.stored(id)
+        return when (HostKeyFingerprint.check(saved, key)) {
+            HostKeyFingerprint.Result.UNKNOWN -> {
                 if (!HostKeyPrompt.autoTrust && !HostKeyPrompt.ask(id, fp, keyTypeOf(key))) {
                     onMessage(context.localized(R.string.hostkey_rejected, id).replace("\n", "\r\n"))
                     return false
@@ -35,10 +36,15 @@ class MokeHostKeyVerifier(
                 onMessage(context.localized(R.string.hostkey_first_seen, id, fp))
                 true
             }
-            fp -> true
-            else -> {
+            HostKeyFingerprint.Result.MATCH -> true
+            // 旧版存下的格式、且就是这把密钥：静默改存成新格式，用户无感。
+            HostKeyFingerprint.Result.LEGACY_MATCH -> {
+                known.store(id, fp)
+                true
+            }
+            HostKeyFingerprint.Result.CHANGED -> {
                 // 资源里用 \n 断行，喂终端需 \r\n。
-                onMessage(context.localized(R.string.hostkey_changed, saved, fp).replace("\n", "\r\n"))
+                onMessage(context.localized(R.string.hostkey_changed, saved.orEmpty(), fp).replace("\n", "\r\n"))
                 false
             }
         }

@@ -39,6 +39,7 @@ class MokeApplication : Application() {
         installOomHprofDumper()
         installTerminalStatusText()
         mirrorHostKeyPolicy()
+        com.briqt.moke.terminal.TerminalAlerts.cancelStale(this)
         try {
             Security.removeProvider(BouncyCastleProvider.PROVIDER_NAME) // "BC"
             Security.insertProviderAt(BouncyCastleProvider(), 1)
@@ -58,6 +59,10 @@ class MokeApplication : Application() {
         val settings = SettingsStore(this)
         CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
             settings.autoTrustNewHostKey.collect { HostKeyPrompt.autoTrust = it }
+        }
+        // 终端提醒同理：回调来自终端（可能没有界面），读进程作用域的镜像。
+        CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+            settings.terminalAlerts.collect { com.briqt.moke.terminal.TerminalAlerts.enabled = it }
         }
     }
 

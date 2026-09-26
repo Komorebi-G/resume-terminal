@@ -29,7 +29,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -82,6 +85,18 @@ fun FontsScreen(
     }
     androidx.compose.runtime.LaunchedEffect(importSuccess) {
         if (importSuccess != null) { kotlinx.coroutines.delay(4000); onClearImportSuccess() }
+    }
+    // 删除字体要重新下载 / 导入才能恢复：二次确认。
+    var pendingDelete by remember { mutableStateOf<FontSpec?>(null) }
+    pendingDelete?.let { spec ->
+        ConfirmDialog(
+            title = stringResource(R.string.font_delete_title),
+            message = stringResource(R.string.font_delete_confirm, if (isZh()) spec.nameZh else spec.name),
+            confirmLabel = stringResource(R.string.action_delete),
+            destructive = true,
+            onConfirm = { pendingDelete = null; onDelete(spec.id) },
+            onDismiss = { pendingDelete = null },
+        )
     }
     // 已下载 / 已上传的排在前面，其次内置，未安装的可下载项垫底（同级保持目录顺序）。
     val sortedFonts = remember(fonts, states) {
@@ -167,7 +182,7 @@ fun FontsScreen(
                     isPrimary = spec.id == primaryId,
                     isFallback = spec.id == fallbackId,
                     onDownload = { onDownload(spec.id) },
-                    onDelete = { onDelete(spec.id) },
+                    onDelete = { pendingDelete = spec },
                     onSetPrimary = { onSetPrimary(spec.id) },
                     onSetFallback = { onSetFallback(if (fallbackId == spec.id) "" else spec.id) },
                 )

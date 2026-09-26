@@ -72,8 +72,13 @@ class MokeSessionService : Service() {
             .setOngoing(true)
             .setShowWhen(false)
             .setContentIntent(
+                // 点通知要回到会话，而不只是把 app 拉到前台（见 MainActivity.ACTION_OPEN_SESSIONS）；
+                // SINGLE_TOP|CLEAR_TOP 复用已有界面，不另起一个。
                 PendingIntent.getActivity(
-                    this, 0, Intent(this, MainActivity::class.java),
+                    this, 0,
+                    Intent(this, MainActivity::class.java)
+                        .setAction(MainActivity.ACTION_OPEN_SESSIONS)
+                        .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
                 )
             )

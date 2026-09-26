@@ -9,6 +9,7 @@ import com.termux.terminal.TerminalTransport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -79,6 +80,15 @@ class TermSession(
      * 光有 startupCommand 不能当作附加成功，否则 UI 会撒谎。
      */
     val tmuxAttached: MutableStateFlow<Boolean?> = MutableStateFlow(null)
+
+    /**
+     * 本会话是**连不上**而结束的（DNS / 网络 / 认证 / 主机密钥被拒），而不是连上后正常退出。
+     * 结束条据此说「连接失败」并给出「编辑主机」——两种结束给同一句「会话已结束」，用户分不清该干什么。
+     */
+    val connectFailed = MutableStateFlow(false)
+
+    /** 本会话上的本地端口转发（SSH 借会话连接，mosh 借控制连接）。 */
+    val forwards: PortForwards? = (transport as? ForwardCapable)?.let { PortForwards(it) }
 
     /** 设自定义标题（空白视为清除，回落到动态标题）。 */
     fun setCustomTitle(t: String?) { customTitle.value = t?.trim()?.ifBlank { null } }
@@ -196,8 +206,10 @@ class SessionManager(context: Context) {
         // 结束文案按本会话的真实处境说：确认附加在 tmux 上、又是正常退出（detach 就是 code 0），
         // 屏幕上写「会话结束」会和界面上「已离开 tmux，远端会话仍在运行」自相矛盾。
         session.sessionStatusText = object : TerminalSession.StatusText {
-            override fun connectFailed(reason: String): String =
-                TerminalSession.statusText.connectFailed(reason)
+            override fun connectFailed(reason: String): String {
+                ts.connectFailed.value = true
+                return TerminalSession.statusText.connectFailed(reason)
+            }
 
             override fun sessionEnded(exitCode: Int): String =
                 if (exitCode == 0 && ts.tmuxAttached.value == true) {
@@ -206,6 +218,17 @@ class SessionManager(context: Context) {
                     TerminalSession.statusText.sessionEnded(exitCode)
                 }
         }
+        // 主机级"连接后自动转发的端口"：连上之后在后台建好（mosh 要现建控制连接，不能占传输线程）。
+        val autoPorts = PortForwards.parsePorts(host.forwardPorts).ports
+        if (autoPorts.isNotEmpty()) {
+            val onUp: () -> Unit = { scope.launch(Dispatchers.IO) { autoPorts.forEach { ts.forwards?.start(it) } } }
+            when (transport) {
+                is SshTransport -> transport.onEstablished = onUp
+                is MoshTransport -> transport.onEstablished = onUp
+            }
+        }
+        // 响铃 / 通知序列 → 用户不在这个会话里时发系统通知（开关默认关闭，见 TerminalAlerts）。
+        controller.onAlert = { t, b -> TerminalAlerts.post(appContext, ts.id, ts.displayTitle.value, t, b) }
         // 有输出即刷新会话最后活动时间（供"更新时间"排序）。
         controller.onActivity = { ts.lastActivityAt = System.currentTimeMillis() }
         _sessions.update { it + ts }
@@ -351,6 +374,8 @@ class SessionManager(context: Context) {
     /** 关闭并从列表移除（关传输幂等）。 */
     fun close(id: String) {
         val ts = get(id) ?: return
+        ts.forwards?.let { f -> scope.launch(Dispatchers.IO) { f.stopAll() } }
+        TerminalAlerts.cancel(appContext, id)
         runCatching { ts.session.finishIfRunning() }
         _sessions.update { list -> list.filterNot { it.id == id } }
         refreshDisplayTitles()

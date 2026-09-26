@@ -40,7 +40,7 @@ class MoshTransport(
      * 不经 shell 提示符注入。为 null 时才轮到主机自己配置的启动命令。
      */
     private val startupCommand: String? = null,
-) : TerminalTransport {
+) : TerminalTransport, ForwardCapable {
 
     /** 本次交给 `mosh-server … -- …` 的程序；null=远端默认 shell。 */
     private val effectiveStartup: String? = startupCommand?.takeIf { it.isNotBlank() }
@@ -67,7 +67,7 @@ class MoshTransport(
                 val termuxBin = File("$nativeLibDir/libtermux.so")
                 if (!moshBin.exists() || !termuxBin.exists()) {
                     feed(session, "\r\n" + appContext.localized(R.string.mosh_unavailable) + "\r\n")
-                    finish(session, 1)
+                    failConnect(session, null)
                     return@Thread
                 }
 
@@ -103,6 +103,7 @@ class MoshTransport(
                 )
                 ptyFd = fd
                 pid = pidArr[0]
+                if (pid > 0) onEstablished?.invoke()
                 val descriptor = ParcelFileDescriptor.adoptFd(fd)
                 pfd = descriptor
                 out = FileOutputStream(descriptor.fileDescriptor)
@@ -163,7 +164,7 @@ class MoshTransport(
                 }
             } catch (e: Throwable) {
                 // 捕获 Throwable（含 UnsatisfiedLinkError 等 Error），保证任何 native/引导失败都只是终端里报错，绝不闪退。
-                if (!closed && !childExited) {
+                if (!closed && !childExited && pid > 0) {
                     feed(
                         session,
                         "\r\n" + appContext.localized(
@@ -175,6 +176,9 @@ class MoshTransport(
                 // createSubprocess 成功后仍由 waiter 收口；引导/创建阶段失败才在这里结束。
                 if (pid > 0) {
                     runCatching { android.system.Os.kill(pid, android.system.OsConstants.SIGKILL) }
+                } else if (!closed) {
+                    // mosh-client 还没起来（引导 SSH 连不上 / mosh-server 回应无法解析）：属于"连接失败"。
+                    failConnect(session, e.message ?: e.javaClass.simpleName)
                 } else {
                     finish(session, 1)
                 }
@@ -219,6 +223,26 @@ class MoshTransport(
     private val controlLock = ReentrantLock()
     private var control: SshConnector.Connected? = null
     private var controlIdleSince = 0L
+    /** 端口转发借用控制连接的次数（受 [controlLock] 保护）：大于 0 时不做空闲回收。 */
+    private var forwardHolds = 0
+
+    /** mosh-client 子进程起来时回调一次，在传输线程上调用——别在里面做阻塞工作。 */
+    var onEstablished: (() -> Unit)? = null
+
+    // mosh 本身不转发 TCP，端口转发只能走 SSH 控制连接。借用期间它必须一直在，
+    // 这部分抵消了 mosh"不长期挂 TCP"的好处——只在确实有转发时才这样。
+    override fun acquireForwardClient(): SSHClient? = controlLock.withLock {
+        if (closed) return null
+        runCatching { controlClient() }.getOrNull()?.also { forwardHolds++ }
+    }
+
+    override fun releaseForwardClient() {
+        controlLock.withLock {
+            if (forwardHolds > 0) forwardHolds--
+            controlIdleSince = System.currentTimeMillis()
+            scheduleReap()
+        }
+    }
     private var reaper: ScheduledExecutorService? = null
 
     /**
@@ -268,7 +292,7 @@ class MoshTransport(
             exec.schedule({
                 if (controlLock.tryLock()) {
                     try {
-                        if (closed || System.currentTimeMillis() - controlIdleSince >= CONTROL_IDLE_MS) closeControl()
+                        if (closed || (forwardHolds == 0 && System.currentTimeMillis() - controlIdleSince >= CONTROL_IDLE_MS)) closeControl()
                         else scheduleReap()
                     } finally {
                         controlLock.unlock()
@@ -333,6 +357,13 @@ class MoshTransport(
     private fun feed(session: TerminalSession, msg: String) {
         val b = msg.toByteArray(StandardCharsets.UTF_8)
         session.processToEmulator(b, b.size)
+    }
+
+    /** 连接建立前失败：按"连接失败"上报（与 [finish] 共用同一个只报一次的闸门）。 */
+    private fun failConnect(session: TerminalSession, reason: String?) {
+        if (finishReported.compareAndSet(false, true)) {
+            session.onTransportConnectFailed(reason)
+        }
     }
 
     private fun finish(session: TerminalSession, code: Int) {

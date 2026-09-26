@@ -45,6 +45,8 @@ data class Host(
      * [SessionPersistence.TMUX] 下：非空则连接时直接按名附加；空则先开普通壳并弹选择器。
      */
     val tmuxSessionName: String = "",
+    /** 连接后自动转发的远端端口（用户原文，如 "5173, 8080"；解析见 `PortForwards.parsePorts`）。 */
+    val forwardPorts: String = "",
 ) {
     /**
      * 展示名：连接名优先，否则 `user@host`。
@@ -96,6 +98,7 @@ data class Host(
         put("lastConnectedAt", lastConnectedAt)
         put("persistence", persistence.name)
         put("tmuxSessionName", tmuxSessionName)
+        put("forwardPorts", forwardPorts)
     }
 
     companion object {
@@ -120,6 +123,7 @@ data class Host(
                 SessionPersistence.valueOf(o.optString("persistence", "NONE"))
             }.getOrDefault(SessionPersistence.NONE),
             tmuxSessionName = o.optString("tmuxSessionName", ""),
+            forwardPorts = o.optString("forwardPorts", ""),
         )
     }
 }

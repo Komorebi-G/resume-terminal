@@ -9,6 +9,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.KeyboardAlt
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.SwipeVertical
@@ -48,6 +49,8 @@ fun TerminalSettingsScreen(
     keepScreenOn: Boolean,
     confirmClose: Boolean,
     autoTrustNewHostKey: Boolean,
+    terminalAlerts: Boolean,
+    onTerminalAlerts: (Boolean) -> Unit,
     onKeyboardMode: (KeyboardMode) -> Unit,
     onScrollMode: (ScrollMode) -> Unit,
     onTmuxScrollSetup: (Boolean) -> Unit,
@@ -119,6 +122,13 @@ fun TerminalSettingsScreen(
                 subtitle = stringResource(R.string.menu_confirm_close_sub),
                 checked = confirmClose,
                 onCheckedChange = onConfirmClose,
+            )
+            SwitchRow(
+                icon = Icons.Filled.NotificationsActive,
+                title = stringResource(R.string.menu_terminal_alerts),
+                subtitle = stringResource(R.string.menu_terminal_alerts_sub),
+                checked = terminalAlerts,
+                onCheckedChange = onTerminalAlerts,
             )
             SwitchRow(
                 icon = Icons.Filled.Key,

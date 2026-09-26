@@ -2119,6 +2119,17 @@ public final class TerminalEmulator {
                     }
                 }
                 break;
+            case 9: // [moke] Desktop notification, iTerm2 style: "9;message".
+                // "9;<n>;..." with a leading numeric sub-command is ConEmu's extension set (e.g. "9;4;..." is a
+                // progress report, emitted continuously by some programs) — those are not notifications.
+                if (!textParameter.matches("[0-9]+(;.*)?")) mSession.onNotification(null, textParameter);
+                break;
+            case 777: // [moke] rxvt-unicode notify extension: "777;notify;title;body".
+                String[] parts = textParameter.split(";", 3);
+                if (parts.length >= 2 && "notify".equals(parts[0])) {
+                    mSession.onNotification(parts[1], parts.length > 2 ? parts[2] : "");
+                }
+                break;
             case 52: // Manipulate Selection Data. Skip the optional first selection parameter(s).
                 int startIndex = textParameter.indexOf(";") + 1;
                 try {

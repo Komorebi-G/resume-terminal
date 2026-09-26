@@ -2,6 +2,7 @@ package com.briqt.moke
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
@@ -10,6 +11,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.LaunchedEffect
@@ -18,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.briqt.moke.data.ThemeMode
+import com.briqt.moke.terminal.TerminalAlerts
 import com.briqt.moke.ui.MokeApp
 import com.briqt.moke.ui.MokeViewModel
 import com.briqt.moke.ui.theme.MokeTheme
@@ -28,6 +31,9 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* 拒绝也不影响会话，仅无常驻通知 */ }
 
     private var notifPermissionAsked = false
+
+    // 与 setContent 里 viewModel() 拿到的是同一个实例（同一 ViewModelStore）。
+    private val vm: MokeViewModel by viewModels()
 
     /**
      * Android 13+ 需授权才会显示后台保活通知（拒绝仅影响通知，不影响会话）。
@@ -60,6 +66,8 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
         super.onCreate(savedInstanceState)
+        // 只处理首次创建：重建（如切换语言）时 intent 还是那一个，不能再跳一次。
+        if (savedInstanceState == null) handleIntent(intent)
         setContent {
             val vm: MokeViewModel = viewModel()
             val themeMode by vm.themeMode.collectAsState()
@@ -90,5 +98,35 @@ class MainActivity : ComponentActivity() {
                 MokeApp(vm)
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        if (intent?.action == ACTION_OPEN_SESSIONS) vm.requestOpenSessions(intent.getStringExtra(EXTRA_SESSION_ID))
+    }
+
+    // 终端提醒只在"用户不在场"时发：界面是否在前台由这里告诉 TerminalAlerts。
+    override fun onStart() {
+        super.onStart()
+        TerminalAlerts.appVisible = true
+        // 从后台切回来时终端页并未重新进入组合，"进入会话即收起提醒"要在这里补上。
+        TerminalAlerts.visibleSessionId?.let { TerminalAlerts.cancel(this, it) }
+    }
+
+    override fun onStop() {
+        TerminalAlerts.appVisible = false
+        super.onStop()
+    }
+
+    companion object {
+        /** 后台保活通知的点击动作：回到会话（只有一个就直接进，多个就进会话列表）。 */
+        const val ACTION_OPEN_SESSIONS = "com.briqt.moke.action.OPEN_SESSIONS"
+
+        /** 可选：直接回到这个会话（终端提醒的通知带它）；会话已不在时退回上面的规则。 */
+        const val EXTRA_SESSION_ID = "com.briqt.moke.extra.SESSION_ID"
     }
 }

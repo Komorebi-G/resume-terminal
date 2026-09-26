@@ -70,7 +70,12 @@ class TerminalController(
         }
     }
 
-    override fun onBell(session: TerminalSession) {}
+    /** 远端响铃（title/body 为 null）或 OSC 9 / 777 通知：交给 [TerminalAlerts] 决定是否提醒。 */
+    var onAlert: ((title: String?, body: String?) -> Unit)? = null
+
+    override fun onBell(session: TerminalSession) { onAlert?.invoke(null, null) }
+
+    override fun onNotification(session: TerminalSession, title: String?, body: String?) { onAlert?.invoke(title, body) }
     override fun onColorsChanged(session: TerminalSession) { view?.onScreenUpdated() }
     override fun onTerminalCursorStateChange(state: Boolean) {}
     override fun setTerminalShellPid(session: TerminalSession, pid: Int) {}
@@ -93,7 +98,25 @@ class TerminalController(
         return scale
     }
 
-    override fun onSingleTapUp(e: MotionEvent?) { showKeyboard() }
+    /** 单击命中了终端里的链接（由界面弹出"打开 / 复制"操作条）。 */
+    var onLinkTapped: ((String) -> Unit)? = null
+
+    /**
+     * 单击：点中链接就交给 [onLinkTapped]，否则照旧弹键盘。远端开了鼠标跟踪时，
+     * TerminalView 在 onUp 里就把点击转给了远端程序，根本走不到这里——不会抢程序的点击。
+     */
+    override fun onSingleTapUp(e: MotionEvent?) {
+        val url = e?.let { linkAt(it) }
+        val handler = onLinkTapped
+        if (url != null && handler != null) handler(url) else showKeyboard()
+    }
+
+    private fun linkAt(e: MotionEvent): String? {
+        val v = view ?: return null
+        val emulator = v.mEmulator ?: return null
+        val (column, row) = v.getColumnAndRow(e, true).let { it[0] to it[1] }
+        return runCatching { TerminalLinks.urlAt(emulator, column, row) }.getOrNull()
+    }
 
     /** 聚焦终端并弹出软键盘（点击终端 / 工具栏键盘键调用）。用自身 [view]，故会话跨页重建 View 也不失效。 */
     fun showKeyboard() {

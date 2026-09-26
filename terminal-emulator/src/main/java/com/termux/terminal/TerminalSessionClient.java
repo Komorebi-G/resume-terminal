@@ -48,4 +48,8 @@ public interface TerminalSessionClient {
 
     void logStackTrace(String tag, Exception e);
 
+
+    /** [moke] Remote program requested a desktop notification (OSC 9 / OSC 777). [title] may be null. */
+    default void onNotification(@NonNull TerminalSession session, String title, String body) {
+    }
 }

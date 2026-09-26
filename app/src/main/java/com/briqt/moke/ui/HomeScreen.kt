@@ -156,6 +156,8 @@ fun HomeScreen(
     // 会话列表里点「关闭」也走二次确认（与终端页 ⋮ 一致），避免误触断掉正在跑的活。
     var pendingClose by remember { mutableStateOf<String?>(null) }
     val closeRequest: (String) -> Unit = { id -> if (confirmClose) pendingClose = id else onCloseSession(id) }
+    // 删除主机会连同密码 / 私钥 / 指纹一起删掉且无法恢复：一律二次确认（危险操作不走"撤销"）。
+    var pendingDeleteHost by remember { mutableStateOf<Host?>(null) }
 
     // 左右滑动切分区：页序即底栏顺序，pager 与外部 [tab] 双向同步。
     val tabs = remember { HomeTab.entries.toList() }
@@ -237,13 +239,24 @@ fun HomeScreen(
         // 每页内容自己吃 Scaffold 的 padding（原来就是这么写的），所以 pager 本身不加内边距。
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             when (tabs[page]) {
-                HomeTab.Connections -> ConnectionsContent(padding, hosts, credentialsUnreadable, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onOpenHostFiles, onDuplicateHost, onDeleteHost, onConnectHost)
+                HomeTab.Connections -> ConnectionsContent(padding, hosts, credentialsUnreadable, hostGroupOrder, hostCollapsedGroups, onToggleHostGroupCollapse, onReorderHostGroups, onReorderHosts, onEditHost, onOpenHostFiles, onDuplicateHost, { pendingDeleteHost = it }, onConnectHost)
                 HomeTab.Sessions -> SessionsContent(padding, sessions, sessionGroupBy, sessionSortBy, onSessionGroupBy, onSessionSortBy, sessionGroupOrder, sessionCollapsedGroups, onToggleSessionGroupCollapse, onReorderSessionGroups, onOpenSession, closeRequest, onDuplicateSession, onReorderSessions, onCloseEndedSessions)
                 HomeTab.Settings -> SettingsMenuContent(
                     padding, keyboardMode, updateInfo, onOpenAppearance, onOpenTerminalSettings, onOpenAbout,
                 )
             }
         }
+    }
+
+    pendingDeleteHost?.let { host ->
+        ConfirmDialog(
+            title = stringResource(R.string.host_delete_title),
+            message = stringResource(R.string.host_delete_confirm, host.displayName),
+            confirmLabel = stringResource(R.string.action_delete),
+            destructive = true,
+            onConfirm = { pendingDeleteHost = null; onDeleteHost(host) },
+            onDismiss = { pendingDeleteHost = null },
+        )
     }
 
     pendingClose?.let { id ->
@@ -698,16 +711,27 @@ private fun SessionsContent(
     // 已结束的会话会一直留在列表里（保留是为了「重新连接」），但一条条 × 太笨：
     // 攒到四五条时清理成本比逐条关闭还高，所以有一条就给一个一次清空的入口。
     val endedCount = sessions.count { !it.alive.collectAsState().value }
+    var confirmClearEnded by remember { mutableStateOf(false) }
     Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
         if (endedCount > 0) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                 horizontalArrangement = Arrangement.End,
             ) {
-                TextButton(onClick = onCloseEnded) {
+                TextButton(onClick = { confirmClearEnded = true }) {
                     Text(stringResource(R.string.sessions_clear_ended, endedCount))
                 }
             }
+        }
+        if (confirmClearEnded && endedCount > 0) {
+            ConfirmDialog(
+                title = stringResource(R.string.sessions_clear_ended_title),
+                message = stringResource(R.string.sessions_clear_ended_confirm, endedCount),
+                confirmLabel = stringResource(R.string.action_clear),
+                destructive = true,
+                onConfirm = { confirmClearEnded = false; onCloseEnded() },
+                onDismiss = { confirmClearEnded = false },
+            )
         }
         if (groupBy == GroupBy.NONE) {
             if (manual) {

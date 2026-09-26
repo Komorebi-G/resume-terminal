@@ -57,6 +57,14 @@ public abstract class TerminalTestCase extends TestCase {
 		public void onColorsChanged() {
 			colorsChanged++;
 		}
+
+		/** [moke] Received OSC 9 / 777 notifications as {title, body}. */
+		public final List<String[]> notifications = new ArrayList<>();
+
+		@Override
+		public void onNotification(String title, String body) {
+			notifications.add(new String[]{title, body});
+		}
 	}
 
 	public TerminalEmulator mTerminal;

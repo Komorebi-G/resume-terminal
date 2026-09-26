@@ -29,7 +29,7 @@ class SshTransport(
      * 直接执行，不启动 shell/模拟键入。为 null 时才轮到主机自己配置的启动命令。
      */
     private val startupCommand: String? = null,
-) : TerminalTransport {
+) : TerminalTransport, ForwardCapable {
 
     /** 本次真正要 exec 的命令；null=启动远端默认 login shell。 */
     private val effectiveStartup: String? = startupCommand?.takeIf { it.isNotBlank() }
@@ -44,6 +44,16 @@ class SshTransport(
     private val writeExec = Executors.newSingleThreadExecutor()
 
     @Volatile private var closed = false
+    /** shell / exec 通道已经打开：此后的异常是"中断"，此前的是"连接失败"。 */
+    @Volatile private var established = false
+
+    /** 连接建立（shell / exec 通道已开）时回调一次，在传输线程上调用——别在里面做阻塞工作。 */
+    var onEstablished: (() -> Unit)? = null
+
+    // 端口转发直接借用会话自己的连接：它和会话同生共死，无需另外维持。
+    override fun acquireForwardClient(): SSHClient? = ssh?.takeIf { established && !closed && it.isConnected && it.isAuthenticated }
+
+    override fun releaseForwardClient() {}
 
     override fun start(session: TerminalSession, columns: Int, rows: Int, cellWidthPixels: Int, cellHeightPixels: Int) {
         Thread({
@@ -89,6 +99,8 @@ class SshTransport(
                 ssh = client
                 sshSession = s as? SessionChannel
                 out = channel.outputStream
+                established = true
+                onEstablished?.invoke()
                 startLatencyProbe(client)
 
                 val input = channel.inputStream
@@ -140,9 +152,15 @@ class SshTransport(
                 }
                 session.onTransportFinished(0)
             } catch (e: Exception) {
-                val msg = ("\r\n" + appContext.localized(R.string.ssh_connect_failed, e.message ?: "") + "\r\n").toByteArray()
-                session.processToEmulator(msg, msg.size)
-                session.onTransportFinished(1)
+                if (!established) {
+                    // 连不上（DNS / 网络 / 认证 / 主机密钥被拒）：按"连接失败"上报，界面据此给出改配置的出路。
+                    session.onTransportConnectFailed(e.message ?: e.javaClass.simpleName)
+                } else {
+                    // 连上之后才断的：是"中断"，不是"连接失败"。
+                    val msg = ("\r\n" + appContext.localized(R.string.ssh_connection_lost, e.message ?: "") + "\r\n").toByteArray()
+                    session.processToEmulator(msg, msg.size)
+                    session.onTransportFinished(1)
+                }
             }
         }, "moke-ssh-${host.host}").start()
     }

@@ -66,6 +66,18 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     /** 多会话管理器：Application 作用域单例，跨导航/Activity 存活，配合前台服务后台保活。 */
     val sessions = (app as MokeApplication).sessions
 
+    /**
+     * 待处理的"回到会话"请求（点后台保活通知时由 MainActivity 发出）。存成状态而不是一次性事件：
+     * 冷启动时请求先于界面组合到达，事件会丢；界面处理完调 [consumeOpenSessions] 清掉，避免重建时重跳。
+     */
+    private val _openSessionsRequest = MutableStateFlow<OpenSessionsRequest?>(null)
+    val openSessionsRequest: StateFlow<OpenSessionsRequest?> = _openSessionsRequest.asStateFlow()
+    fun requestOpenSessions(sessionId: String? = null) { _openSessionsRequest.value = OpenSessionsRequest(sessionId) }
+    fun consumeOpenSessions() { _openSessionsRequest.value = null }
+
+    /** [sessionId] 非空 = 指明要回到哪个会话（终端提醒）；为空 = 按会话数决定落点（保活通知）。 */
+    data class OpenSessionsRequest(val sessionId: String?)
+
     val hosts: StateFlow<List<Host>> = store.hosts
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -765,6 +777,11 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     fun setConfirmCloseSession(on: Boolean) = viewModelScope.launch { settings.setConfirmCloseSession(on) }
 
     fun setAutoTrustNewHostKey(on: Boolean) = viewModelScope.launch { settings.setAutoTrustNewHostKey(on) }
+
+    /** 「响铃与通知提醒」（默认关闭）；镜像到 TerminalAlerts.enabled 由 MokeApplication 维护。 */
+    val terminalAlerts: StateFlow<Boolean> = settings.terminalAlerts
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    fun setTerminalAlerts(on: Boolean) = viewModelScope.launch { settings.setTerminalAlerts(on) }
 
     fun setKeepScreenOn(on: Boolean) = viewModelScope.launch { settings.setKeepScreenOn(on) }
 

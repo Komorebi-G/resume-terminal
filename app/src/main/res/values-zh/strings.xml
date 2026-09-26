@@ -146,6 +146,7 @@
     <string name="login_command_hint">如 cd /var/www &amp;&amp; ls</string>
 
     <!-- 终端 -->
+    <string name="session_connect_failed">连接失败</string>
     <string name="session_ended">会话已结束</string>
     <string name="reconnect">重新连接</string>
     <string name="offline">离线</string>
@@ -190,7 +191,6 @@
     <string name="cursor_bar">竖线</string>
     <string name="cursor_blink">光标闪烁</string>
     <string name="reset_done">已恢复默认</string>
-    <string name="undo">撤销</string>
     <string name="fallback_none">无（系统兜底）</string>
 
     <!-- 字体能力标签 -->
@@ -290,7 +290,7 @@
 
     <!-- 传输层（终端内提示，换行 \r\n 由代码补） -->
     <string name="ssh_via_jump">[moke] 经跳板机 %1$s 连接…</string>
-    <string name="ssh_connect_failed">[SSH 连接失败: %1$s]</string>
+    <string name="ssh_connection_lost">[SSH 连接中断: %1$s]</string>
     <string name="startup_command_exited">[moke] 启动命令 \"%1$s\" 已退出（%2$d）</string>
     <string name="mosh_unavailable">[mosh 不可用] 此安装包未内置 mosh native 组件（当前仅 arm64-v8a）。请改用 SSH 协议，或安装含 mosh 的版本。</string>
     <string name="mosh_bootstrapping">[moke] 正在通过 SSH 引导 mosh-server…</string>
@@ -409,4 +409,47 @@
     <string name="font_zip_entry_missing">压缩包内未找到匹配 \'%1$s\' 的 ttf</string>
     <string name="font_read_failed">无法读取所选文件</string>
     <string name="font_invalid">不是有效的字体文件（需 TTF / OTF）</string>
+    <!-- 危险操作的二次确认 -->
+    <string name="host_delete_title">删除主机</string>
+    <string name="host_delete_confirm">删除「%1$s」？
+保存的密码 / 私钥和主机指纹会一并删除，无法恢复。</string>
+    <string name="sessions_clear_ended_title">清理已结束会话</string>
+    <string name="sessions_clear_ended_confirm">清理 %1$d 个已结束的会话？它们的终端输出会一并丢弃。</string>
+    <string name="action_clear">清理</string>
+    <string name="font_delete_title">删除字体</string>
+    <string name="font_delete_confirm">删除「%1$s」？之后要用需重新下载或导入。</string>
+    <string name="hostkey_clear_confirm">清除 %1$s 已保存的指纹？下次连接时会重新请你确认指纹。</string>
+    <string name="action_clear_fingerprint">清除</string>
+    <string name="reset_default_confirm">把外观设置全部恢复为默认值？当前的字体、配色、字号与光标设置会被覆盖。</string>
+    <!-- 终端链接操作条 -->
+    <string name="link_open">打开</string>
+    <string name="link_copied">已复制链接</string>
+    <string name="link_open_failed">没有可以打开这个链接的应用</string>
+    <!-- 端口转发 -->
+    <string name="fwd_title">端口转发</string>
+    <string name="fwd_add">添加</string>
+    <string name="fwd_add_title">添加端口转发</string>
+    <string name="fwd_hint">把远端机器上的端口转到手机本机，再用浏览器访问——适合查看远端 dev server 之类没有公网地址的服务。只监听手机本机，局域网里的其他设备访问不到。</string>
+    <string name="fwd_empty">还没有转发。点「添加」，或在终端里点一下 localhost 链接。</string>
+    <string name="fwd_connecting">远端 %1$d · 正在建立…</string>
+    <string name="fwd_row_remote">远端 %1$d</string>
+    <string name="fwd_failed">已断开</string>
+    <string name="fwd_copy_address">复制地址</string>
+    <string name="fwd_stop">停止</string>
+    <string name="fwd_remote_port">远端端口</string>
+    <string name="fwd_local_port">本机端口（可选）</string>
+    <string name="fwd_local_port_hint">留空自动分配</string>
+    <string name="fwd_local_port_invalid">请输入 1024–65535，或留空</string>
+    <string name="fwd_open_failed">转发失败：无法建立到远端 %1$d 端口的转发</string>
+    <string name="link_forward_open">转发并打开</string>
+    <string name="menu_port_forward">端口转发</string>
+    <string name="field_forward_ports">连接后自动转发的端口（可选）</string>
+    <string name="field_forward_ports_hint">如 5173, 8080；连上后自动建好，可在终端的端口转发面板里查看</string>
+    <string name="field_forward_ports_invalid">无法识别：%1$s</string>
+    <!-- 终端提醒 -->
+    <string name="alert_bell">终端响铃了</string>
+    <string name="alert_channel_name">终端提醒</string>
+    <string name="alert_channel_desc">远端程序响铃或发出通知时提醒你</string>
+    <string name="menu_terminal_alerts">响铃与通知提醒</string>
+    <string name="menu_terminal_alerts_sub">远端程序响铃或发出通知序列（OSC 9 / 777）时，如果你不在这个会话里，用系统通知提醒你</string>
 </resources>

@@ -3,6 +3,9 @@ package com.briqt.moke.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import com.briqt.moke.terminal.TerminalAlerts
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -87,12 +90,31 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     val confirmClose by vm.confirmCloseSession.collectAsState()
     val keepScreenOn by vm.keepScreenOn.collectAsState()
     val autoTrustNewHostKey by vm.autoTrustNewHostKey.collectAsState()
+    val terminalAlerts by vm.terminalAlerts.collectAsState()
     val hostKeyRequest by vm.hostKeyRequest.collectAsState()
     val tmuxScrollSetup by vm.tmuxScrollSetup.collectAsState()
     val tmuxPickerFor by vm.tmuxPicker.collectAsState()
     val scrollMode by vm.scrollMode.collectAsState()
     val includePrerelease by vm.includePrerelease.collectAsState()
     val updateInfo by vm.updateInfo.collectAsState()
+    val openSessionsRequest by vm.openSessionsRequest.collectAsState()
+
+    // 点后台保活通知：只有一个会话就直接进它，多个就进会话列表；停在文件页的先断开 SFTP。
+    LaunchedEffect(openSessionsRequest) {
+        val req = openSessionsRequest ?: return@LaunchedEffect
+        if (screen is Screen.Files) vm.closeFiles()
+        val list = vm.sessions.sessions.value
+        val target = req.sessionId?.takeIf { id -> list.any { it.id == id } }
+        if (target != null) {
+            screen = Screen.Terminal(target)
+        } else if (list.size == 1) {
+            screen = Screen.Terminal(list.first().id)
+        } else {
+            screen = Screen.Home
+            homeTab = HomeTab.Sessions
+        }
+        vm.consumeOpenSessions()
+    }
 
     // 系统返回键：二级页回其父；Home 非「连接」分区回「连接」；Home「连接」分区不拦截（退出 app）。
     val backEnabled = screen !is Screen.Home || homeTab != HomeTab.Connections
@@ -178,6 +200,13 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                 // key(sessionId)：Terminal→Terminal 直接切会话时强制重建子树，
                 // 否则 AndroidView 只创建一次会残留旧 View（重连表现为「坏了」）。
                 key(s.sessionId) {
+                    // 正看着的会话不发提醒；进来即收起它已有的提醒。
+                    val appContext = LocalContext.current.applicationContext
+                    DisposableEffect(s.sessionId) {
+                        TerminalAlerts.visibleSessionId = s.sessionId
+                        TerminalAlerts.cancel(appContext, s.sessionId)
+                        onDispose { if (TerminalAlerts.visibleSessionId == s.sessionId) TerminalAlerts.visibleSessionId = null }
+                    }
                     TerminalScreen(
                         ts = ts,
                         primaryFontId = primaryFontId,
@@ -203,6 +232,13 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         onClose = {
                             vm.closeSession(ts.id)
                             screen = Screen.Home; homeTab = HomeTab.Sessions
+                        },
+                        // 连接失败 → 改配置：失败的会话只有一行报错，关掉它，编辑的是主机的**最新**配置
+                        // （ts.host 是打开那一刻的快照）。
+                        onEditHost = {
+                            val latest = hosts.firstOrNull { it.id == ts.host.id } ?: ts.host
+                            vm.closeSession(ts.id)
+                            screen = Screen.Edit(latest)
                         },
                         onFontSize = { vm.setFontSize(it) },
                         onKeyboardMode = { vm.setKeyboardMode(it) },
@@ -296,6 +332,8 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
             keepScreenOn = keepScreenOn,
             confirmClose = confirmClose,
             autoTrustNewHostKey = autoTrustNewHostKey,
+            terminalAlerts = terminalAlerts,
+            onTerminalAlerts = { vm.setTerminalAlerts(it) },
             onKeyboardMode = { vm.setKeyboardMode(it) },
             onScrollMode = { vm.setScrollMode(it) },
             onTmuxScrollSetup = { vm.setTmuxScrollSetup(it) },

@@ -1,5 +1,16 @@
 package com.briqt.moke.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.ui.text.style.TextOverflow
+import com.briqt.moke.terminal.TerminalLinks
+import com.briqt.moke.terminal.PortForwards
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -85,7 +96,9 @@ import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.ui.theme.MokeShapes
 import com.termux.view.TerminalView
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -108,6 +121,7 @@ fun TerminalScreen(
     onBack: () -> Unit,
     onReconnect: () -> Unit,
     onClose: () -> Unit,
+    onEditHost: () -> Unit,
     onFontSize: (Float) -> Unit,
     onKeyboardMode: (KeyboardMode) -> Unit,
     onScrollMode: (ScrollMode) -> Unit,
@@ -125,6 +139,7 @@ fun TerminalScreen(
     val keyboard = LocalSoftwareKeyboardController.current
     val title by ts.displayTitle.collectAsState()
     val alive by ts.alive.collectAsState()
+    val connectFailed by ts.connectFailed.collectAsState()
     val latency by ts.latency.collectAsState()
     val tmuxState by ts.tmuxState.collectAsState()
     val remoteTmuxName by ts.remoteTmuxName.collectAsState()
@@ -154,6 +169,8 @@ fun TerminalScreen(
         }
     }
     var showTmux by remember(ts.id) { mutableStateOf(false) }
+    var showForwards by remember(ts.id) { mutableStateOf(false) }
+    val forwardEntries by (ts.forwards?.entries ?: NO_FORWARDS).collectAsState()
     // 键盘模式选择弹窗 / 关闭会话二次确认弹窗。
     var showKeyboardModeDialog by remember(ts.id) { mutableStateOf(false) }
     var showCloseConfirm by remember(ts.id) { mutableStateOf(false) }
@@ -186,6 +203,11 @@ fun TerminalScreen(
     // 当前滚屏位置（0 = 底部）：翻进历史时给一个「跳到底部」入口。
     // 此前回到底部只有两条路——反复滑，或随便敲个键（那会真的把字节发给远端）。
     var topRow by remember(ts.id) { mutableIntStateOf(0) }
+    // 单击命中的链接：非空即显示底部操作条（打开 / 复制），一段时间不操作自动收起。
+    var tappedLink by remember(ts.id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(tappedLink) {
+        if (tappedLink != null) { delay(LINK_BAR_VISIBLE_MS); tappedLink = null }
+    }
 
     val controller = ts.controller
     val scope = rememberCoroutineScope()
@@ -217,6 +239,7 @@ fun TerminalScreen(
         controller.onFontSizeSp = { sp -> onFontSize(sp); zoomHintSp = sp }
         // one-shot 粘滞修饰被输入法按键消费后，熄灭高亮（用一次即取消）；锁定态不受影响。
         controller.onModifiersConsumed = { mods = mods.consumeOnce() }
+        controller.onLinkTapped = { url -> tappedLink = url }
         // 终端底色必须由 View 自己铺：vendored TerminalRenderer 只在"单元格背景 ≠ 调色板默认背景"时
         // 才画矩形，默认背景那片区域完全不画 → 露出的是 View/窗口背景。此前应用恒深色才碰巧看着对，
         // 一旦浅色主题（或选了 Nord 这类非纯黑方案）就会串色。
@@ -233,6 +256,7 @@ fun TerminalScreen(
                 controller.view = null
                 controller.onFontSizeSp = null
                 controller.onModifiersConsumed = null
+                controller.onLinkTapped = null
             }
             view.mokeOnScrollUnavailable = null
             view.mokeOnTopRowChanged = null
@@ -324,6 +348,8 @@ fun TerminalScreen(
                     if (!tmuxState.busy) onTmuxRefresh()
                     showTmux = true
                 },
+                forwardCount = forwardEntries.size,
+                onOpenForwards = { keyboard?.hide(); showForwards = true },
                 onFontSize = onFontSize,
                 onPickKeyboardMode = { showKeyboardModeDialog = true },
                 onToggleExtraKeys = onToggleExtraKeys,
@@ -382,10 +408,40 @@ fun TerminalScreen(
                 // 「跳到底部」：只在真的翻进历史时出现。翻到几百行深处后，回底部原本只能反复滑动，
                 // 或者随便敲个键——但敲键会把字节真发给远端，在别人的 shell 里不是无害动作。
                 JumpToBottomButton(
-                    visible = topRow < 0 && !panelOpen && !showComposer,
+                    visible = topRow < 0 && !panelOpen && !showComposer && tappedLink == null,
                     onClick = { controller.scrollToBottom() },
                     modifier = Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 12.dp),
                 )
+                // 单击命中链接后的操作条：一步可达，但不直接跳走（误触一下就离开终端太粗暴）。
+                tappedLink?.let { url ->
+                    LinkActionBar(
+                        url = url,
+                        onOpen = if (TerminalLinks.isLocal(url)) null else {
+                            { tappedLink = null; openUrl(context, url) }
+                        },
+                        // 本机链接：先把远端端口转到手机，再打开改写后的地址（一步完成，转发会留在面板里）。
+                        onForwardOpen = run {
+                            val forwards = ts.forwards
+                            val remotePort = PortForwards.remotePortOf(url)
+                            if (forwards == null || remotePort == null || !alive) null else {
+                                {
+                                    tappedLink = null
+                                    scope.launch {
+                                        val local = withContext(Dispatchers.IO) { forwards.start(remotePort) }
+                                        if (local != null) {
+                                            openUrl(context, PortForwards.rewriteToLocal(url, local))
+                                        } else {
+                                            Toast.makeText(context, context.getString(R.string.fwd_open_failed, remotePort), Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        onCopy = { tappedLink = null; copyText(context, url) },
+                        onDismiss = { tappedLink = null },
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                    )
+                }
                 // 全键盘面板：**浮在终端上**而不是插进 Column——插进去会改变终端行数，
                 // 每次展开/收起都触发远端 SIGWINCH，全屏 TUI 会整屏重绘。
                 // 只对"整块从下方滑入/滑出"做动画：面板自身高度恒定，动画期间没有内容重排，
@@ -410,6 +466,7 @@ fun TerminalScreen(
                         Text(
                             stringResource(
                                 when {
+                                    connectFailed -> R.string.session_connect_failed
                                     remoteTmuxName != null && tmuxAttached == true -> R.string.tmux_left
                                     remoteTmuxName == null && tmuxAttached == false ->
                                         R.string.tmux_attach_unconfirmed
@@ -420,6 +477,13 @@ fun TerminalScreen(
                             modifier = Modifier.weight(1f),
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            // 连不上多半是地址 / 凭据填错：直接给出改配置的入口。
+                            if (connectFailed) {
+                                TextButton(onClick = onEditHost) {
+                                    Icon(Icons.Filled.Edit, contentDescription = null)
+                                    Text("  " + stringResource(R.string.host_edit))
+                                }
+                            }
                             TextButton(onClick = onReconnect) {
                                 Icon(Icons.Filled.Refresh, contentDescription = null)
                                 Text("  " + stringResource(R.string.reconnect))
@@ -467,6 +531,7 @@ fun TerminalScreen(
                         }
                     },
                 )
+                else -> ExtraKeysRestoreHandle(onRestore = onToggleExtraKeys)
             }
         }
     }
@@ -502,6 +567,17 @@ fun TerminalScreen(
             onConfirm = { showCloseConfirm = false; onClose() },
             onDismiss = { showCloseConfirm = false },
         )
+    }
+
+    if (showForwards) {
+        ts.forwards?.let { forwards ->
+            ForwardPanel(
+                forwards = forwards,
+                onOpen = { openUrl(context, it) },
+                onCopy = { copyText(context, it) },
+                onDismiss = { showForwards = false },
+            )
+        }
     }
 
     if (showTmux) {
@@ -612,6 +688,8 @@ private fun TerminalTopBar(
     tmuxAvailable: Boolean,
     tmuxCount: Int,
     onOpenTmux: () -> Unit,
+    forwardCount: Int,
+    onOpenForwards: () -> Unit,
     onFontSize: (Float) -> Unit,
     onPickKeyboardMode: () -> Unit,
     onToggleExtraKeys: () -> Unit,
@@ -679,6 +757,21 @@ private fun TerminalTopBar(
                     }
                 }
             }
+            // 端口转发：只在有转发时出现（交互原则 P1），角标 = 转发条数；点开即转发面板。
+            if (forwardCount > 0) {
+                IconButton(onClick = onOpenForwards) {
+                    BadgedBox(
+                        badge = {
+                            Badge(
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            ) { Text(forwardCount.toString()) }
+                        },
+                    ) {
+                        Icon(Icons.Filled.SwapHoriz, contentDescription = stringResource(R.string.menu_port_forward), tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
             // tmux 入口（⋮ 左侧）：远端**装了 tmux 就常驻**（零会话也能从面板新建），没装则完全不出现。
             // 角标只在有会话时显示会话数，避免挂一个「0」在那里。
             if (tmuxAvailable) {
@@ -724,6 +817,12 @@ private fun TerminalTopBar(
                         leadingIcon = { Icon(Icons.Filled.Folder, contentDescription = null, modifier = Modifier.size(20.dp)) },
                         onClick = { menuOpen = false; onOpenFiles() },
                     )
+                    // 端口转发的主入口（交互原则 P2）；顶栏图标与 localhost 链接都只是它的快捷方式。
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.menu_port_forward), style = MaterialTheme.typography.bodyMedium) },
+                        leadingIcon = { Icon(Icons.Filled.SwapHoriz, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                        onClick = { menuOpen = false; onOpenForwards() },
+                    )
                     HorizontalDivider()
                     // 字号步进（点 ± 不关闭菜单，便于连续调整）。
                     Row(
@@ -738,12 +837,15 @@ private fun TerminalTopBar(
                         IconButton(onClick = { onFontSize(fontSizeSp + 0.5f) }, modifier = Modifier.size(36.dp)) {
                             Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.increase), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                         }
+                        // 恢复默认并进同一行：⋮ 保持在 8 项以内（交互原则 P5），给「端口转发」腾位置。
+                        IconButton(
+                            onClick = { onFontSize(TerminalController.DEFAULT_FONT_SIZE_SP) },
+                            enabled = fontSizeSp != TerminalController.DEFAULT_FONT_SIZE_SP,
+                            modifier = Modifier.size(36.dp),
+                        ) {
+                            Icon(Icons.Filled.RestartAlt, contentDescription = stringResource(R.string.reset_font_size), modifier = Modifier.size(18.dp))
+                        }
                     }
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.reset_font_size), style = MaterialTheme.typography.bodyMedium) },
-                        leadingIcon = { Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(20.dp)) },
-                        onClick = { menuOpen = false; onFontSize(TerminalController.DEFAULT_FONT_SIZE_SP) },
-                    )
                     HorizontalDivider()
                     // 弹出软键盘。
                     DropdownMenuItem(
@@ -786,6 +888,72 @@ private fun TerminalTopBar(
                         onClick = { menuOpen = false; onClose() },
                     )
                 }
+            }
+        }
+    }
+}
+
+private val NO_FORWARDS = kotlinx.coroutines.flow.MutableStateFlow(emptyList<PortForwards.Entry>())
+
+/** 用系统浏览器（或用户选的应用）打开链接；没有能处理的应用时给提示而不是崩溃。 */
+private fun openUrl(context: Context, url: String) {
+    runCatching {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.onFailure {
+        Toast.makeText(context, context.getString(R.string.link_open_failed), Toast.LENGTH_SHORT).show()
+    }
+}
+
+private fun copyText(context: Context, text: String) {
+    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    cm.setPrimaryClip(ClipData.newPlainText("moke", text))
+    Toast.makeText(context, context.getString(R.string.link_copied), Toast.LENGTH_SHORT).show()
+}
+
+/** 链接操作条不操作时的自动收起时长。 */
+private const val LINK_BAR_VISIBLE_MS = 8000L
+
+/**
+ * 链接操作条：链接（单行截断）+ 打开 + 复制 + 关闭，样式同「跳到底部」浮层。
+ * [onOpen] 为 null 表示不提供打开（本机回环地址在手机上打开没有意义）；本机链接改为 [onForwardOpen]「转发并打开」。
+ */
+@Composable
+private fun LinkActionBar(
+    url: String,
+    onOpen: (() -> Unit)?,
+    onForwardOpen: (() -> Unit)?,
+    onCopy: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.95f),
+        contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+        shape = MokeShapes.floating,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = 12.dp, end = 2.dp),
+        ) {
+            Icon(Icons.Filled.Link, contentDescription = null, modifier = Modifier.size(18.dp))
+            Text(
+                url,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).padding(start = 8.dp),
+            )
+            val action = MaterialTheme.colorScheme.inversePrimary
+            if (onOpen != null) {
+                TextButton(onClick = onOpen) { Text(stringResource(R.string.link_open), color = action) }
+            }
+            if (onForwardOpen != null) {
+                TextButton(onClick = onForwardOpen) { Text(stringResource(R.string.link_forward_open), color = action) }
+            }
+            TextButton(onClick = onCopy) { Text(stringResource(R.string.copy_text), color = action) }
+            IconButton(onClick = onDismiss) {
+                Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close), modifier = Modifier.size(18.dp))
             }
         }
     }

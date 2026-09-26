@@ -50,6 +50,8 @@ import com.briqt.moke.R
 import com.briqt.moke.data.AuthType
 import com.briqt.moke.data.Host
 import com.briqt.moke.data.SessionPersistence
+import com.briqt.moke.terminal.KnownHosts
+import com.briqt.moke.terminal.PortForwards
 import com.briqt.moke.ui.theme.MokeDimens
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -80,9 +82,13 @@ fun HostEditScreen(
     var jumpHostId by remember { mutableStateOf(base.jumpHostId) }
     var startupCommand by remember { mutableStateOf(base.startupCommand) }
     var loginCommand by remember { mutableStateOf(base.loginCommand) }
+    var forwardPorts by remember { mutableStateOf(base.forwardPorts) }
+    // 非法项不静默丢弃：列出来并禁止保存，免得用户以为配好了、连上却什么都没转。
+    val forwardInvalid = PortForwards.parsePorts(forwardPorts).invalid
     var group by remember { mutableStateOf(base.group) }
     var persistence by remember { mutableStateOf(base.persistence) }
     var fingerprintCleared by remember { mutableStateOf(false) }
+    var confirmClearFingerprint by remember { mutableStateOf(false) }
 
     // 跳板机候选：其它主机（排除自身，避免自引用）。
     val jumpOptions = listOf(DropdownOption(id = "", title = stringResource(R.string.jump_none))) +
@@ -326,15 +332,43 @@ fun HostEditScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
 
+            // 连接后自动转发的端口：固定的开发端口不必每次手动加。
+            OutlinedTextField(
+                value = forwardPorts, onValueChange = { forwardPorts = it },
+                label = { Text(stringResource(R.string.field_forward_ports)) },
+                supportingText = {
+                    Text(
+                        if (forwardInvalid.isEmpty()) stringResource(R.string.field_forward_ports_hint)
+                        else stringResource(R.string.field_forward_ports_invalid, forwardInvalid.joinToString(", "))
+                    )
+                },
+                isError = forwardInvalid.isNotEmpty(),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
             // 主机指纹：服务器换过密钥时的自救路径。指纹按 host:port 存、与本条目无关，
             // 删除重建连接不会清除它——社区实报有人因此彻底连不上、只能清应用数据。
             if (host.isNotBlank()) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    TextButton(
-                        onClick = {
+                if (confirmClearFingerprint) {
+                    val target = KnownHosts.idOf(host.trim(), port.toIntOrNull() ?: 22)
+                    ConfirmDialog(
+                        title = stringResource(R.string.hostkey_clear),
+                        message = stringResource(R.string.hostkey_clear_confirm, target),
+                        confirmLabel = stringResource(R.string.action_clear_fingerprint),
+                        destructive = true,
+                        onConfirm = {
+                            confirmClearFingerprint = false
                             onClearFingerprint(host.trim(), port.toIntOrNull() ?: 22)
                             fingerprintCleared = true
                         },
+                        onDismiss = { confirmClearFingerprint = false },
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    TextButton(
+                        // 清除后下次连接要重新确认指纹，属于安全相关的不可逆操作：二次确认。
+                        onClick = { confirmClearFingerprint = true },
                         enabled = savedFingerprint != null && !fingerprintCleared,
                         contentPadding = PaddingValues(0.dp),
                     ) { Text(stringResource(R.string.hostkey_clear)) }
@@ -372,6 +406,7 @@ fun HostEditScreen(
                                 jumpHostId = jumpHostId,
                                 startupCommand = startupCommand.trim(),
                                 loginCommand = loginCommand.trim(),
+                                forwardPorts = PortForwards.parsePorts(forwardPorts).ports.joinToString(", "),
                                 group = group.trim(),
                                 persistence = persistence,
                                 // 关掉持久化时一并忘记记住的会话名，避免下次重新开启后悄悄附加到旧会话。
@@ -383,7 +418,7 @@ fun HostEditScreen(
                             )
                         )
                     },
-                    enabled = host.isNotBlank() && username.isNotBlank(),
+                    enabled = host.isNotBlank() && username.isNotBlank() && forwardInvalid.isEmpty(),
                     modifier = Modifier.weight(1f),
                 ) { Text(stringResource(R.string.action_save)) }
             }

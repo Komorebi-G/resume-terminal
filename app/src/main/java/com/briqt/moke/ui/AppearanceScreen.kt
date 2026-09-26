@@ -36,7 +36,6 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -165,7 +164,22 @@ fun AppearanceScreen(
     var overflowOpen by remember { mutableStateOf(false) }
     // Snackbar 文案在 @Composable 作用域先取好（协程里不能调 stringResource）。
     val resetDoneMsg = stringResource(R.string.reset_done)
-    val undoLabel = stringResource(R.string.undo)
+    // 恢复默认会覆盖字体 / 配色 / 字号 / 光标：危险操作统一二次确认，不提供"撤销"。
+    var confirmReset by remember { mutableStateOf(false) }
+    if (confirmReset) {
+        ConfirmDialog(
+            title = stringResource(R.string.reset_default),
+            message = stringResource(R.string.reset_default_confirm),
+            confirmLabel = stringResource(R.string.reset_default),
+            destructive = true,
+            onConfirm = {
+                confirmReset = false
+                onResetDefaults()
+                scope.launch { snackbarState.showSnackbar(resetDoneMsg, duration = SnackbarDuration.Short) }
+            },
+            onDismiss = { confirmReset = false },
+        )
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarState) },
@@ -194,19 +208,7 @@ fun AppearanceScreen(
                                 leadingIcon = { Icon(Icons.Filled.RestartAlt, contentDescription = null) },
                                 onClick = {
                                     overflowOpen = false
-                                    // 先快照当前值，重置后用 Snackbar 提供「撤销」。
-                                    val pScheme = schemeId; val pPrimary = primaryFontId; val pFallback = fallbackFontId
-                                    val pSize = fontSizeSp; val pLine = lineSpacing; val pLetter = letterSpacing
-                                    val pCursor = cursorStyle; val pBlink = cursorBlink
-                                    onResetDefaults()
-                                    scope.launch {
-                                        val r = snackbarState.showSnackbar(resetDoneMsg, undoLabel, duration = SnackbarDuration.Short)
-                                        if (r == SnackbarResult.ActionPerformed) {
-                                            onSelectScheme(pScheme); onSelectPrimary(pPrimary); onSelectFallback(pFallback)
-                                            onFontSize(pSize); onLineSpacing(pLine); onLetterSpacing(pLetter)
-                                            onCursorStyle(pCursor); onCursorBlink(pBlink)
-                                        }
-                                    }
+                                    confirmReset = true
                                 },
                             )
                         }

@@ -29,4 +29,11 @@ public abstract class TerminalOutput {
 
     public abstract void onColorsChanged();
 
+    /**
+     * [moke] The remote program asked for a desktop notification (OSC 9 / OSC 777).
+     * Non-abstract so existing implementations need not care; [title] may be null.
+     */
+    public void onNotification(String title, String body) {
+    }
+
 }
