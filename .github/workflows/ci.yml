@@ -37,7 +37,8 @@ jobs:
         run: ./gradlew assembleStandardDebug --stacktrace
 
       - name: Unit tests
-        run: ./gradlew testDebugUnitTest --stacktrace
+        # app 带 flavor，没有 testDebugUnitTest 这个任务名，须单独点名，否则只跑到 terminal-* 两个库。
+        run: ./gradlew testDebugUnitTest testStandardDebugUnitTest --stacktrace
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v7

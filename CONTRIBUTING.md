@@ -12,7 +12,7 @@ Please file bugs or suggestions via [issues](https://github.com/briqt/moke/issue
 
 - JDK 17, Android SDK (compileSdk 35 / build-tools 35)
 - Create `local.properties` at the project root: `sdk.dir=/path/to/Android/sdk`
-- Build: `./gradlew assembleStandardDebug`; test: `./gradlew testDebugUnitTest` (for the `maple` flavor and the mosh native build, see the Build section of the README)
+- Build: `./gradlew assembleStandardDebug`; test: `./gradlew testDebugUnitTest testStandardDebugUnitTest` (for the `maple` flavor and the mosh native build, see the Build section of the README)
 
 ## Conventions
 
