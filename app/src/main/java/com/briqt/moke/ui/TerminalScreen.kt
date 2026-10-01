@@ -1,3 +1,5 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 package com.briqt.moke.ui
 
 import android.content.ClipData
@@ -6,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.ui.text.style.TextOverflow
 import com.briqt.moke.terminal.TerminalLinks
@@ -56,11 +59,17 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -69,6 +78,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,6 +92,12 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.briqt.moke.R
 import com.briqt.moke.data.KeyboardMode
 import com.briqt.moke.data.ScrollMode
+import com.briqt.moke.data.SessionPersistence
+import com.briqt.moke.terminal.ComposerInput
+import com.briqt.moke.terminal.QuickShortcut
+import com.briqt.moke.terminal.KeySeq
+import androidx.compose.ui.text.input.TextFieldValue
+import kotlinx.coroutines.channels.Channel
 import com.briqt.moke.terminal.KeyId
 import com.briqt.moke.terminal.ModKind
 import com.briqt.moke.terminal.ModState
@@ -91,6 +107,7 @@ import com.briqt.moke.terminal.TerminalController
 import com.briqt.moke.terminal.TerminalThemes
 import com.briqt.moke.terminal.TmuxPhase
 import com.briqt.moke.terminal.TmuxSession
+import com.briqt.moke.terminal.ZmxPhase
 import com.briqt.moke.ui.theme.MokeDimens
 import com.briqt.moke.ui.theme.MokeMono
 import com.briqt.moke.ui.theme.MokeShapes
@@ -133,7 +150,13 @@ fun TerminalScreen(
     onTmuxKill: (String) -> Unit,
     onTmuxAttach: (TmuxSession) -> Unit,
     onTmuxTakeOver: (TmuxSession) -> Unit,
+    onZmxRefresh: () -> Unit,
+    onZmxOpen: (String) -> Unit,
+    onZmxKill: (String) -> Unit,
     onOpenFiles: () -> Unit,
+    quickShortcut: QuickShortcut = QuickShortcut.SHIFT_LEFT,
+    onQuickShortcut: (QuickShortcut) -> Unit = {},
+    onZmxInstall: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -142,7 +165,9 @@ fun TerminalScreen(
     val connectFailed by ts.connectFailed.collectAsState()
     val latency by ts.latency.collectAsState()
     val tmuxState by ts.tmuxState.collectAsState()
+    val zmxState by ts.zmxState.collectAsState()
     val remoteTmuxName by ts.remoteTmuxName.collectAsState()
+    val remoteZmxName by ts.remoteZmxName.collectAsState()
     // 只有侧通道确认过"确实附加上了"才敢说「已离开 tmux」；tmux 缺失/启动失败会回落普通 shell，
     // 那种情况必须说清没附上，否则 UI 在撒谎。
     val tmuxAttached by ts.tmuxAttached.collectAsState()
@@ -169,6 +194,18 @@ fun TerminalScreen(
         }
     }
     var showTmux by remember(ts.id) { mutableStateOf(false) }
+    var showZmx by remember(ts.id) { mutableStateOf(false) }
+    val setupSnackbar = remember(ts.id) { SnackbarHostState() }
+    var setupHintShown by rememberSaveable(ts.id) { mutableStateOf(false) }
+    val setupHint = stringResource(R.string.zmx_plain_hint)
+    val setupAction = stringResource(R.string.zmx_setup)
+    LaunchedEffect(zmxState.phase) {
+        if (zmxState.phase == ZmxPhase.NOT_INSTALLED && !setupHintShown) {
+            setupHintShown = true
+            if (setupSnackbar.showSnackbar(setupHint, setupAction, withDismissAction = true,
+                    duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed) showZmx = true
+        }
+    }
     var showForwards by remember(ts.id) { mutableStateOf(false) }
     val forwardEntries by (ts.forwards?.entries ?: NO_FORWARDS).collectAsState()
     // 键盘模式选择弹窗 / 关闭会话二次确认弹窗。
@@ -178,19 +215,25 @@ fun TerminalScreen(
     // 已有确定结论（装了 / 没装）就不再重探：从文件页返回、来回切会话都会重跑这个 effect，
     // 而 mosh 上一次探测就是一次完整 SSH 登录。列表在打开面板与每次管理动作后仍会实时刷新。
     LaunchedEffect(ts.id) {
-        val phase = ts.tmuxState.value.phase
-        if (phase == TmuxPhase.IDLE || phase == TmuxPhase.ERROR) onTmuxRefresh()
+        if (ts.host.persistence == SessionPersistence.ZMX) {
+            val phase = ts.zmxState.value.phase
+            if (phase == ZmxPhase.IDLE || phase == ZmxPhase.ERROR) onZmxRefresh()
+        } else if (ts.host.persistence == SessionPersistence.TMUX) {
+            val phase = ts.tmuxState.value.phase
+            if (phase == TmuxPhase.IDLE || phase == TmuxPhase.ERROR) onTmuxRefresh()
+        }
     }
     // 修饰键三态（一次性/锁定/关）：附加键与面板共用一份状态，并同步给 controller 供 IME 输入使用。
     var mods by remember(ts.id) { mutableStateOf(Modifiers()) }
     // 全键盘面板是否展开（浮在终端之上，不挤压终端 → 不触发远端 resize）。
+    var showQuickShortcut by remember(ts.id) { mutableStateOf(false) }
     var panelOpen by remember(ts.id) { mutableStateOf(false) }
 
-    var showComposer by remember(ts.id) { mutableStateOf(false) }
+    var showComposer by rememberSaveable(ts.id) { mutableStateOf(false) }
     // 顶栏 ⋮ 里的「修改标题」弹窗开关。
     var showTitleDialog by remember(ts.id) { mutableStateOf(false) }
     // 文本段草稿：提升到此，关闭 sheet 保留、发送后清空。
-    var composerText by remember(ts.id) { mutableStateOf("") }
+    var composerText by rememberSaveable(ts.id, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
     // 捏合缩放提示（持有当前 sp，非空即显示；2 秒后自动消失）。
     var zoomHintSp by remember(ts.id) { mutableStateOf<Float?>(null) }
     // 「无处可滚」提示：滑动落到既没有历史、也判不出方向键是否安全的状态时说明原因。
@@ -213,13 +256,128 @@ fun TerminalScreen(
     val scope = rememberCoroutineScope()
     // View 按会话 id 记忆：切换会话得到全新 View，attach 到既有 session 后滚屏/连接保留。
     val view = remember(ts.id) { TerminalView(context, null) }
+    var selectingText by remember(ts.id) { mutableStateOf(false) }
+    var savedCommandDraft by rememberSaveable(ts.id, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
+    val composerFocusRequester = remember(ts.id) { FocusRequester() }
+    // Output taps should not switch IME routes while an unsent local draft exists.
+    SideEffect {
+        view.isFocusable = !showComposer
+        view.isFocusableInTouchMode = !showComposer
+        controller.onKeyboardRequested = {
+            if (showComposer) {
+                composerFocusRequester.requestFocus()
+                keyboard?.show()
+                true
+            } else false
+        }
+    }
+    fun closeComposer(showKeyboard: Boolean = true) {
+        showComposer = false
+        view.isFocusable = true
+        view.isFocusableInTouchMode = true
+        if (showKeyboard) controller.showKeyboard() else {
+            keyboard?.hide()
+            view.requestFocus()
+        }
+    }
+    fun handleBack() {
+        mods = Modifiers().also { syncMods(controller, it) }
+        when {
+            panelOpen -> panelOpen = false
+            view.isSelectingText -> view.stopTextSelectionMode(true)
+            showComposer -> closeComposer(showKeyboard = false)
+            else -> { keyboard?.hide(); onBack() }
+        }
+    }
+    BackHandler(enabled = panelOpen || selectingText || showComposer) { handleBack() }
+
+    fun prepareCommand(command: String) {
+        val current = composerText.text
+        if (current.isNotEmpty() && current !in listOf("/model", "/resume")) {
+            if (savedCommandDraft.text.isNotEmpty()) {
+                Toast.makeText(context, R.string.command_draft_busy, Toast.LENGTH_SHORT).show()
+                return
+            }
+            savedCommandDraft = composerText
+        }
+        composerText = TextFieldValue(command, selection = androidx.compose.ui.text.TextRange(command.length))
+        panelOpen = false
+        showComposer = true
+        mods = Modifiers().also { syncMods(controller, it) }
+    }
+
+    // Serialize text + key pairs so rapid Tab/Enter taps cannot overtake an earlier draft.
+    val inputQueue = remember(ts.id) { Channel<ComposerInput.Dispatch>(Channel.UNLIMITED) }
+    LaunchedEffect(ts.id) {
+        for (input in inputQueue) {
+            if (input.text.isNotEmpty()) {
+                // Honor bracketed paste for Codex prompts and multiline shell input.
+                val emulator = ts.session.emulator
+                if (emulator != null) emulator.paste(input.text) else ts.session.write(input.text)
+            }
+            if (input.key.isNotEmpty()) {
+                if (input.text.isNotEmpty()) delay(40)
+                ts.session.write(input.key)
+            }
+        }
+    }
+    fun pasteClipboard() {
+        mods = Modifiers().also { syncMods(controller, it) }
+        val raw = controller.clipboardText()
+        val text = raw?.let { com.termux.terminal.TerminalEmulator.sanitizePasteText(it) }
+            ?.replace("\r\n", "\n")?.replace('\r', '\n')
+        if (text.isNullOrEmpty()) {
+            Toast.makeText(context, R.string.clipboard_empty, Toast.LENGTH_SHORT).show()
+            return
+        }
+        view.stopTextSelectionMode(true)
+        // A multiline clipboard opens a draft for review even when bracketed paste is unavailable.
+        if (showComposer || '\n' in text) {
+            val selection = composerText.selection
+            val start = selection.min
+            val end = selection.max
+            val next = composerText.text.replaceRange(start, end, text)
+            composerText = TextFieldValue(next, selection = androidx.compose.ui.text.TextRange(start + text.length))
+            panelOpen = false
+            showComposer = true
+        } else {
+            inputQueue.trySend(ComposerInput.send(text, false))
+        }
+    }
+    fun copySelection() {
+        if (view.isSelectingText) view.copySelectedTextToClipboard()
+        else if (showComposer && !composerText.selection.collapsed) {
+            val selection = composerText.selection
+            copyText(context, composerText.text.substring(selection.min, selection.max))
+        }
+        mods = Modifiers().also { syncMods(controller, it) }
+    }
+    // Read current draft state for hardware shortcuts and the floating selection toolbar.
+    SideEffect { controller.onPasteRequested = { pasteClipboard() } }
+    fun dispatchKey(key: KeyId, ctrl: Boolean = false, alt: Boolean = false, shift: Boolean = false) {
+        val bytes = KeySeq.encode(key, ctrl || mods.ctrlOn, alt || mods.altOn, shift || mods.shiftOn)
+        if (bytes == "\u0016") {
+            pasteClipboard()
+            return
+        }
+        if (bytes == "\u0003" && (view.isSelectingText ||
+            (showComposer && !composerText.selection.collapsed) || shift || mods.shiftOn)) {
+            copySelection()
+            return
+        }
+        val input = ComposerInput.shortcut(if (showComposer) composerText.text else "", bytes)
+        if (showComposer && input.remainingDraft != composerText.text) composerText = TextFieldValue(input.remainingDraft)
+        inputQueue.trySend(input)
+        mods = mods.consumeOnce().also { syncMods(controller, it) }
+    }
+
 
     DisposableEffect(ts.id) {
         controller.view = view
         view.setTerminalViewClient(controller)
         // 必须可在触摸模式获焦，否则按键/IME 输入会落到其它可聚焦控件。
-        view.isFocusable = true
-        view.isFocusableInTouchMode = true
+        view.isFocusable = !showComposer
+        view.isFocusableInTouchMode = !showComposer
         view.keepScreenOn = keepScreenOn
         controller.cursorStyle = cursorStyle
         controller.cursorBlink = cursorBlink
@@ -240,6 +398,11 @@ fun TerminalScreen(
         // one-shot 粘滞修饰被输入法按键消费后，熄灭高亮（用一次即取消）；锁定态不受影响。
         controller.onModifiersConsumed = { mods = mods.consumeOnce() }
         controller.onLinkTapped = { url -> tappedLink = url }
+        controller.onCopyModeChanged = { active ->
+            selectingText = active
+            // Entering/leaving selection must not leave a sticky Ctrl armed for the next letter.
+            mods = Modifiers().also { syncMods(controller, it) }
+        }
         // 终端底色必须由 View 自己铺：vendored TerminalRenderer 只在"单元格背景 ≠ 调色板默认背景"时
         // 才画矩形，默认背景那片区域完全不画 → 露出的是 View/窗口背景。此前应用恒深色才碰巧看着对，
         // 一旦浅色主题（或选了 Nord 这类非纯黑方案）就会串色。
@@ -257,6 +420,9 @@ fun TerminalScreen(
                 controller.onFontSizeSp = null
                 controller.onModifiersConsumed = null
                 controller.onLinkTapped = null
+                controller.onKeyboardRequested = null
+                controller.onPasteRequested = null
+                controller.onCopyModeChanged = null
             }
             view.mokeOnScrollUnavailable = null
             view.mokeOnTopRowChanged = null
@@ -326,6 +492,7 @@ fun TerminalScreen(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(setupSnackbar) },
         topBar = {
             // 双行顶栏：主标题（会话名）+ 细小副标题（user@host · 协议 · 延迟）。
             // 连接信息收进顶栏，不再单独占用终端区域。
@@ -335,18 +502,27 @@ fun TerminalScreen(
                 deviceName = ts.host.displayName.ifBlank { stringResource(R.string.unnamed) },
                 useMosh = ts.host.useMosh,
                 alive = alive,
-                tmuxDetached = remoteTmuxName != null && tmuxAttached == true,
+                persistentDetached = remoteTmuxName != null && tmuxAttached == true,
                 latencyMs = latency,
                 showLatency = !ts.host.useMosh,
                 fontSizeSp = fontSizeSp,
                 extraKeysVisible = extraKeysVisible,
                 keyboardMode = keyboardMode,
-                tmuxAvailable = tmuxState.phase != TmuxPhase.IDLE &&
-                    tmuxState.phase != TmuxPhase.NOT_INSTALLED,
-                tmuxCount = tmuxState.sessions.size,
-                onOpenTmux = {
-                    if (!tmuxState.busy) onTmuxRefresh()
-                    showTmux = true
+                sessionAvailable = if (ts.host.persistence == SessionPersistence.ZMX) true
+                    else ts.host.persistence == SessionPersistence.TMUX &&
+                        tmuxState.phase != TmuxPhase.IDLE && tmuxState.phase != TmuxPhase.NOT_INSTALLED,
+                sessionCount = if (ts.host.persistence == SessionPersistence.ZMX)
+                    zmxState.sessions.size else tmuxState.sessions.size,
+                sessionTitle = if (ts.host.persistence == SessionPersistence.ZMX)
+                    stringResource(R.string.zmx_open) else stringResource(R.string.tmux_open),
+                onOpenSessions = {
+                    if (ts.host.persistence == SessionPersistence.ZMX) {
+                        if (!zmxState.busy) onZmxRefresh()
+                        showZmx = true
+                    } else {
+                        if (!tmuxState.busy) onTmuxRefresh()
+                        showTmux = true
+                    }
                 },
                 forwardCount = forwardEntries.size,
                 onOpenForwards = { keyboard?.hide(); showForwards = true },
@@ -358,7 +534,7 @@ fun TerminalScreen(
                 onShowKeyboard = { controller.showKeyboard() },
                 // 离开终端页前先收起软键盘（否则返回列表页键盘残留）。
                 onClose = { keyboard?.hide(); if (confirmClose) showCloseConfirm = true else onClose() },
-                onBack = { keyboard?.hide(); onBack() },
+                onBack = { handleBack() },
             )
         },
     ) { padding ->
@@ -447,9 +623,12 @@ fun TerminalScreen(
                 // 只对"整块从下方滑入/滑出"做动画：面板自身高度恒定，动画期间没有内容重排，
                 // 因此不会出现 rc.2 那种边框与内容各走各的。
                 KeyboardPanelOverlay(
-                    visible = panelOpen && extraKeysVisible && !showComposer,
+                    visible = panelOpen && (extraKeysVisible || showComposer),
+                    quickShortcut = quickShortcut,
+                    onConfigureShortcut = { showQuickShortcut = true },
+                    onCommand = { prepareCommand(it) },
                     mods = mods,
-                    onKey = { key -> mods = sendKey(ts, controller, mods, key) },
+                    onKey = { key -> dispatchKey(key) },
                     onToggleMod = { kind -> mods = toggleMod(controller, mods, kind) },
                     onDismiss = { panelOpen = false },
                     modifier = Modifier.align(Alignment.BottomCenter),
@@ -467,6 +646,7 @@ fun TerminalScreen(
                             stringResource(
                                 when {
                                     connectFailed -> R.string.session_connect_failed
+                                    remoteZmxName != null -> R.string.zmx_disconnected
                                     remoteTmuxName != null && tmuxAttached == true -> R.string.tmux_left
                                     remoteTmuxName == null && tmuxAttached == false ->
                                         R.string.tmux_attach_unconfirmed
@@ -497,42 +677,65 @@ fun TerminalScreen(
                 }
             }
 
-            // 底部：文本段展开时就地替换附加键行（同窗口，软键盘不收起再弹起）；否则显示附加键。
-            when {
-                showComposer -> TextBlockComposer(
+            if (showComposer) {
+                if (savedCommandDraft.text.isNotEmpty()) {
+                    TextButton(
+                        enabled = composerText.text.isEmpty() || composerText.text in listOf("/model", "/resume"),
+                        onClick = {
+                            composerText = savedCommandDraft
+                            savedCommandDraft = TextFieldValue()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(R.string.command_restore_draft)) }
+                }
+                TextBlockComposer(
                     value = composerText,
-                    onValueChange = { composerText = it },
-                    onDismiss = { showComposer = false; controller.showKeyboard() },
-                    onSend = { text, appendEnter ->
-                        composerText = ""      // 发送后清空草稿
-                        showComposer = false
-                        controller.showKeyboard()
-                        scope.launch {
-                            if (text.isNotEmpty()) ts.session.write(text)
-                            // 正文与回车分两次写、中间隔一个极小延时，让 CR 作为独立按键(单独一次 read)到达；
-                            // 否则「正文+尾部 CR」会被 raw 模式 TUI(如 claude / vim 插入态)判为粘贴，只插入换行而不提交。
-                            if (appendEnter) {
-                                if (text.isNotEmpty()) delay(40)
-                                ts.session.write("\r")
-                            }
-                        }
+                    onValueChange = { next ->
+                        val character = if (mods.ctrlOn || mods.altOn)
+                            ComposerInput.modifiedInsertion(composerText.text, next.text) else null
+                        if (character != null) dispatchKey(KeyId.Chars(character)) else composerText = next
                     },
+                    onDismiss = { closeComposer() },
+                    onSend = { enter ->
+                        val text = composerText.text // Read live state: the IME may have just committed a word.
+                        composerText = TextFieldValue()
+                        inputQueue.trySend(ComposerInput.send(text, enter))
+                        // Keep the editor/IME focused for the next command or prompt.
+                    },
+                    onKey = { key, ctrl, alt, shift -> dispatchKey(key, ctrl, alt, shift) },
+                    focusRequester = composerFocusRequester,
+                    isDraftEmpty = { composerText.text.isEmpty() },
+                    onPaste = { pasteClipboard() },
+                    onCopy = { copySelection() },
+                    outputSelected = selectingText,
                 )
-                extraKeysVisible -> ExtraKeys(
-                    rows = DEFAULT_EXTRA_KEYS,
+            }
+            if (extraKeysVisible || showComposer) {
+                ExtraKeys(
+                    rows = extraKeyRows(quickShortcut, selectingText || (showComposer && !composerText.selection.collapsed)),
                     mods = mods,
                     panelOpen = panelOpen,
-                    onKey = { key -> mods = sendKey(ts, controller, mods, key) },
+                    composerOpen = showComposer,
+                    onKey = { key -> dispatchKey(key) },
                     onToggleMod = { kind -> mods = toggleMod(controller, mods, kind) },
+                    onLockMod = { kind ->
+                        mods = mods.lock(kind).also { syncMods(controller, it) }
+                        Toast.makeText(context, context.getString(R.string.modifier_lock_feedback, kind.name), Toast.LENGTH_SHORT).show()
+                    },
                     onAction = { id ->
                         when (id) {
-                            ACTION_COMPOSER -> showComposer = true
+                            ACTION_COMPOSER -> {
+                                if (showComposer) closeComposer() else showComposer = true
+                            }
+                            ACTION_MODEL -> prepareCommand("/model")
+                            ACTION_RESUME -> prepareCommand("/resume")
+                            ACTION_PASTE -> pasteClipboard()
+                            ACTION_COPY -> copySelection()
                             ACTION_PANEL -> panelOpen = !panelOpen
                         }
                     },
                 )
-                else -> ExtraKeysRestoreHandle(onRestore = onToggleExtraKeys)
-            }
+            } else ExtraKeysRestoreHandle(onRestore = onToggleExtraKeys)
         }
     }
 
@@ -557,7 +760,9 @@ fun TerminalScreen(
     if (showCloseConfirm) {
         ConfirmDialog(
             title = stringResource(R.string.close_connection),
-            message = if (remoteTmuxName != null) {
+            message = if (remoteZmxName != null) {
+                stringResource(R.string.close_zmx_connection_confirm, title)
+            } else if (remoteTmuxName != null) {
                 stringResource(R.string.close_tmux_connection_confirm, title)
             } else {
                 stringResource(R.string.close_connection_confirm, title)
@@ -595,6 +800,24 @@ fun TerminalScreen(
             onNew = { onTmuxNew(it) },
         )
     }
+    if (showQuickShortcut) {
+        QuickShortcutDialog(quickShortcut, onDismiss = { showQuickShortcut = false }, onSelect = {
+            onQuickShortcut(it)
+            showQuickShortcut = false
+        })
+    }
+    if (showZmx) {
+        ZmxPanel(
+            state = zmxState,
+            currentName = remoteZmxName,
+            onDismiss = { showZmx = false },
+            onRefresh = onZmxRefresh,
+            onOpen = onZmxOpen,
+            onKill = onZmxKill,
+            onInstall = onZmxInstall,
+            canInstall = alive,
+        )
+    }
 }
 
 /**
@@ -608,6 +831,9 @@ fun TerminalScreen(
 @Composable
 private fun KeyboardPanelOverlay(
     visible: Boolean,
+    quickShortcut: QuickShortcut,
+    onConfigureShortcut: () -> Unit,
+    onCommand: (String) -> Unit,
     mods: Modifiers,
     onKey: (KeyId) -> Unit,
     onToggleMod: (ModKind) -> Unit,
@@ -622,6 +848,9 @@ private fun KeyboardPanelOverlay(
     ) {
         KeyboardPanel(
             sections = KEY_SECTIONS,
+            quickShortcut = quickShortcut,
+            onConfigureShortcut = onConfigureShortcut,
+            onCommand = onCommand,
             mods = mods,
             onKey = onKey,
             onToggleMod = onToggleMod,
@@ -630,18 +859,7 @@ private fun KeyboardPanelOverlay(
     }
 }
 
-/**
- * 按当前修饰把一个附加键编码后写入会话，并消费一次性修饰（锁定态保留）。
- * 字节一律经 `KeySeq` 生成——这样 Ctrl+← / Shift+Tab 这类组合才成立。
- */
-private fun sendKey(ts: TermSession, controller: TerminalController, mods: Modifiers, key: KeyId): Modifiers {
-    val bytes = mods.encode(key)
-    if (bytes.isNotEmpty()) ts.session.write(bytes)
-    // 附加键消费掉一次性修饰后必须同步 controller，否则输入法打的下一个字母会被重复加上 Ctrl。
-    return mods.consumeOnce().also { syncMods(controller, it) }
-}
-
-/** 切换修饰键三态，并把 Ctrl/Alt 同步给 controller（输入法打字那条路要用）。 */
+/** 点按启用/取消，并把 Ctrl/Alt 同步给 controller（输入法打字那条路要用）。 */
 private fun toggleMod(controller: TerminalController, mods: Modifiers, kind: ModKind): Modifiers =
     mods.toggle(kind).also { syncMods(controller, it) }
 
@@ -679,15 +897,16 @@ private fun TerminalTopBar(
     deviceName: String,
     useMosh: Boolean,
     alive: Boolean,
-    tmuxDetached: Boolean = false,
+    persistentDetached: Boolean = false,
     latencyMs: Int?,
     showLatency: Boolean,
     fontSizeSp: Float,
     extraKeysVisible: Boolean,
     keyboardMode: KeyboardMode,
-    tmuxAvailable: Boolean,
-    tmuxCount: Int,
-    onOpenTmux: () -> Unit,
+    sessionAvailable: Boolean,
+    sessionCount: Int,
+    sessionTitle: String,
+    onOpenSessions: () -> Unit,
     forwardCount: Int,
     onOpenForwards: () -> Unit,
     onFontSize: (Float) -> Unit,
@@ -737,7 +956,7 @@ private fun TerminalTopBar(
                     when {
                         !alive -> Text(
                             "· " + stringResource(
-                                if (tmuxDetached) R.string.tmux_left_short else R.string.offline,
+                                if (persistentDetached) R.string.tmux_left_short else R.string.offline,
                             ),
                             fontFamily = MokeMono,
                             fontSize = 11.sp,
@@ -774,21 +993,21 @@ private fun TerminalTopBar(
             }
             // tmux 入口（⋮ 左侧）：远端**装了 tmux 就常驻**（零会话也能从面板新建），没装则完全不出现。
             // 角标只在有会话时显示会话数，避免挂一个「0」在那里。
-            if (tmuxAvailable) {
-                IconButton(onClick = onOpenTmux) {
+            if (sessionAvailable) {
+                IconButton(onClick = onOpenSessions) {
                     // 角标是"远端有几个 tmux 会话"这条信息，不是告警：Material 默认的 error 红
                     // 看着像未读消息/出错了，用次要容器色表达"可点进去看"。
                     BadgedBox(
                         badge = {
-                            if (tmuxCount > 0) {
+                            if (sessionCount > 0) {
                                 Badge(
                                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
                                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                ) { Text(tmuxCount.toString()) }
+                                ) { Text(sessionCount.toString()) }
                             }
                         },
                     ) {
-                        Icon(Icons.Filled.Dashboard, contentDescription = stringResource(R.string.tmux_open), tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Filled.Dashboard, contentDescription = sessionTitle, tint = MaterialTheme.colorScheme.primary)
                     }
                 }
             }

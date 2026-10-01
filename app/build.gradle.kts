@@ -1,3 +1,5 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -9,11 +11,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.briqt.moke"
+        applicationId = "dev.lbh.remotework"
         minSdk = 24
         targetSdk = 35
-        versionCode = 47
-        versionName = "0.1.21-rc.1"
+        versionCode = 6
+        versionName = "0.1.5"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
         // mosh native 目前仅提供 arm64-v8a 预编译（scripts/build-mosh-native.sh）；其它 ABI 后续补齐。
@@ -133,4 +135,6 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.ui.test.junit4)
+    debugImplementation(libs.androidx.ui.test.manifest)
 }

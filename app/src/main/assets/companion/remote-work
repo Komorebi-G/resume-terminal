@@ -1,0 +1,65 @@
+#!/bin/sh
+# Added for Resume Terminal, 2026-09-30 to 2026-10-01.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Resume Terminal companion wrapper
+set -eu
+export ZMX_DIR="$HOME/.local/state/resume-terminal/zmx"
+export ZMX_NO_DETACH_KEY=1
+unset ZMX_SESSION_PREFIX
+zmx_bin="$HOME/.local/share/resume-terminal/bin/zmx"
+if [ ! -x "$zmx_bin" ]; then
+    zmx_bin=$(command -v zmx || true)
+fi
+if [ -z "$zmx_bin" ] && [ -x "$HOME/.local/bin/zmx" ]; then
+    zmx_bin="$HOME/.local/bin/zmx"
+fi
+if [ -z "$zmx_bin" ]; then
+    echo 'zmx is missing. Use the phone persistent terminal panel to install the Linux companion.' >&2
+    exit 127
+fi
+case "${1:-}" in
+    -h|--help)
+        echo 'Usage: remote-work [--list | SESSION [PROGRAM ...]]'
+        echo 'Without arguments, pick a running terminal or name a new one.'
+        exit 0 ;;
+    -l|--list) exec "$zmx_bin" list ;;
+esac
+if [ "$#" -gt 0 ]; then
+    session_name="$1"
+    shift
+else
+    sessions=$("$zmx_bin" list --short)
+    previous_ifs=$IFS
+    IFS='
+'
+    set -f
+    index=0
+    if [ -n "$sessions" ]; then
+        printf 'Persistent terminals:\n'
+        for candidate in $sessions; do
+            index=$((index + 1))
+            printf '  %d) %s\n' "$index" "$candidate"
+        done
+    fi
+    printf 'Number to resume or name to create: '
+    IFS= read -r choice
+    session_name=$choice
+    index=0
+    for candidate in $sessions; do
+        index=$((index + 1))
+        if [ "$choice" = "$index" ]; then session_name=$candidate; break; fi
+    done
+    set +f
+    IFS=$previous_ifs
+fi
+session_bytes=$(LC_ALL=C; printf '%s' "${#session_name}")
+invalid=no
+case "$session_name" in *[![:space:]]*) ;; *) invalid=yes ;; esac
+case "$session_name" in
+    ''|*/*|*\\*|-*|.|..|*[[:cntrl:]]*) invalid=yes ;;
+esac
+if [ "$invalid" = yes ] || [ "$session_bytes" -gt 64 ]; then
+    echo 'Use a name up to 64 UTF-8 bytes, without slashes, control characters or a leading dash.' >&2
+    exit 2
+fi
+exec "$zmx_bin" attach "$session_name" "$@"

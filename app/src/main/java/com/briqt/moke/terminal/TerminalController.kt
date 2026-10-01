@@ -1,4 +1,9 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 package com.briqt.moke.terminal
+
+import com.briqt.moke.R
+import com.briqt.moke.localized
 
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -25,6 +30,7 @@ class TerminalController(
 
     /** 有终端输出/屏幕更新时回调（供上层刷新会话"最后活动时间"）。 */
     var onActivity: (() -> Unit)? = null
+    var onZmxFallback: (() -> Unit)? = null
 
     private val appContext = context.applicationContext
     private val clipboard = appContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -49,11 +55,16 @@ class TerminalController(
     @Volatile var cursorBlink: Boolean = true
 
     /** 软键盘模式（见 [KeyboardMode]）；改动后须 [restartInput] 让输入法重新取 EditorInfo。 */
-    @Volatile var keyboardMode: KeyboardMode = KeyboardMode.SECURE
+    @Volatile var keyboardMode: KeyboardMode = KeyboardMode.IME
 
     // ---------- TerminalSessionClient ----------
     override fun onTextChanged(changedSession: TerminalSession) { onActivity?.invoke(); view?.onScreenUpdated() }
-    override fun onTitleChanged(changedSession: TerminalSession) { onTitle(changedSession.title) }
+    override fun onTitleChanged(changedSession: TerminalSession) {
+        if (changedSession.title == Zmx.FALLBACK_TITLE) {
+            onZmxFallback?.invoke()
+            onTitle(appContext.localized(R.string.zmx_temporary_title))
+        } else onTitle(changedSession.title)
+    }
     override fun onSessionFinished(finishedSession: TerminalSession) { onFinished() }
 
     override fun onCopyTextToClipboard(session: TerminalSession, text: String?) {
@@ -62,11 +73,19 @@ class TerminalController(
         }
     }
 
+    /** UI routes all paste entry points through the current editor and ordered input queue. */
+    var onPasteRequested: (() -> Unit)? = null
+
+    fun clipboardText(): String? {
+        val clip = clipboard.primaryClip ?: return null
+        return if (clip.itemCount > 0) clip.getItemAt(0).coerceToText(appContext)?.toString() else null
+    }
+
     override fun onPasteTextFromClipboard(session: TerminalSession?) {
-        val clip = clipboard.primaryClip ?: return
-        if (clip.itemCount > 0) {
-            val text = clip.getItemAt(0).coerceToText(appContext)?.toString()
-            if (!text.isNullOrEmpty()) session?.write(text)
+        val handler = onPasteRequested
+        if (handler != null) handler() else {
+            val text = clipboardText()
+            if (!text.isNullOrEmpty()) session?.emulator?.paste(text)
         }
     }
 
@@ -118,8 +137,12 @@ class TerminalController(
         return runCatching { TerminalLinks.urlAt(emulator, column, row) }.getOrNull()
     }
 
+    /** An active command editor can keep keyboard focus when the output is tapped. */
+    var onKeyboardRequested: (() -> Boolean)? = null
+
     /** 聚焦终端并弹出软键盘（点击终端 / 工具栏键盘键调用）。用自身 [view]，故会话跨页重建 View 也不失效。 */
     fun showKeyboard() {
+        if (onKeyboardRequested?.invoke() == true) return
         val v = view ?: return
         v.requestFocus()
         val imm = v.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
@@ -150,7 +173,8 @@ class TerminalController(
      * `onCreateInputConnection` 读取一处，无其它副作用。
      */
     override fun isTerminalViewSelected(): Boolean = keyboardMode != KeyboardMode.IME
-    override fun copyModeChanged(copyMode: Boolean) {}
+    var onCopyModeChanged: ((Boolean) -> Unit)? = null
+    override fun copyModeChanged(copyMode: Boolean) { onCopyModeChanged?.invoke(copyMode) }
     override fun onKeyDown(keyCode: Int, e: KeyEvent?, session: TerminalSession?): Boolean = false
     override fun onKeyUp(keyCode: Int, e: KeyEvent?): Boolean = false
     override fun onLongPress(event: MotionEvent?): Boolean = false

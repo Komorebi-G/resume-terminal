@@ -26,3 +26,11 @@ app/src/maple/res/font/maple_mono.ttf
 /AGENTS.md
 # 内部设计文档（不公开）
 /ARCHITECTURE.md
+
+# 本机连接记录、测试截图和交付包元数据不公开
+/docs/local/
+/docs/runtime/
+/docs/QUALITY-0.1.1.md
+/dist/
+__pycache__/
+*.pyc

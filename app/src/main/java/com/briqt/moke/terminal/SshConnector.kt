@@ -1,12 +1,17 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 package com.briqt.moke.terminal
 
 import android.content.Context
+import com.briqt.moke.R
+import com.briqt.moke.localized
 import com.briqt.moke.data.AuthType
 import com.briqt.moke.data.Host
 import net.schmizz.keepalive.KeepAliveProvider
 import net.schmizz.sshj.DefaultConfig
 import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.userauth.password.PasswordUtils
+import net.schmizz.sshj.userauth.UserAuthException
 import java.io.File
 
 /**
@@ -88,25 +93,31 @@ class SshConnector(
 
     /** 密码 / 私钥认证。私钥必须先落盘（sshj 的 loadKeys 只吃路径），用完立即删除。 */
     fun authenticate(client: SSHClient, h: Host) {
-        when (h.authType) {
-            AuthType.PASSWORD -> client.authPassword(h.username, h.password)
-            AuthType.KEY -> {
-                val keyFile = File.createTempFile("moke_key_", ".pem", cacheDir)
-                try {
-                    keyFile.writeText(h.privateKeyPem)
-                    val kp = if (h.passphrase.isBlank()) {
-                        client.loadKeys(keyFile.absolutePath)
-                    } else {
-                        client.loadKeys(
-                            keyFile.absolutePath,
-                            PasswordUtils.createOneOff(h.passphrase.toCharArray()),
-                        )
+        try {
+            when (h.authType) {
+                AuthType.PASSWORD -> client.authPassword(h.username, h.password)
+                AuthType.KEY -> {
+                    val keyFile = File.createTempFile("moke_key_", ".pem", cacheDir)
+                    try {
+                        keyFile.writeText(h.privateKeyPem)
+                        val kp = if (h.passphrase.isBlank()) {
+                            client.loadKeys(keyFile.absolutePath)
+                        } else {
+                            client.loadKeys(
+                                keyFile.absolutePath,
+                                PasswordUtils.createOneOff(h.passphrase.toCharArray()),
+                            )
+                        }
+                        client.authPublickey(h.username, kp)
+                    } finally {
+                        keyFile.delete()
                     }
-                    client.authPublickey(h.username, kp)
-                } finally {
-                    keyFile.delete()
                 }
             }
+        } catch (e: UserAuthException) {
+            throw UserAuthException(
+                appContext.localized(R.string.ssh_auth_failed, h.username + "@" + h.host), e,
+            )
         }
     }
 

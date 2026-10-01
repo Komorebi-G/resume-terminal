@@ -1,3 +1,5 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 package com.briqt.moke.terminal
 
 import android.content.Context
@@ -112,7 +114,8 @@ class SshTransport(
                 // 主机自配启动命令时仍注入——"登录后自动执行"对 cmd/powershell 之类同样成立。
                 val loginCmd = host.loginCommand
                 val lastOut = java.util.concurrent.atomic.AtomicLong(0L)
-                if (startupCommand == null && loginCmd.isNotBlank()) {
+                if (startupCommand == null && host.persistence == com.briqt.moke.data.SessionPersistence.NONE &&
+                    loginCmd.isNotBlank()) {
                     Thread({
                         while (!closed && lastOut.get() == 0L) { try { Thread.sleep(50) } catch (_: InterruptedException) { return@Thread } }
                         val deadline = System.currentTimeMillis() + 4000  // 静默等待上限，兜底
@@ -137,20 +140,20 @@ class SshTransport(
                 }
                 // 启动命令非零退出（拼错、远端没这个程序、参数不对）：把退出码摆出来，
                 // 否则屏幕上只剩一句"会话已结束"，用户无从判断是自己写错还是网络断了。
+                val exitCode = runCatching {
+                    sshSession?.join(2, java.util.concurrent.TimeUnit.SECONDS)
+                    sshSession?.exitStatus
+                }.getOrNull() ?: 0
                 if (startupCommand == null && effectiveStartup != null) {
                     // exit-status 是通道关闭前后才到的异步消息：EOF 之后立刻读通常还是 null，
                     // 必须先等通道真正 close（真机实测：不等就永远拿不到退出码）。
-                    val code = runCatching {
-                        sshSession?.join(2, java.util.concurrent.TimeUnit.SECONDS)
-                        sshSession?.exitStatus
-                    }.getOrNull()
-                    if (code != null && code != 0) {
+                    if (exitCode != 0) {
                         feed(session, "\r\n" + appContext.localized(
-                            R.string.startup_command_exited, effectiveStartup, code
+                            R.string.startup_command_exited, effectiveStartup, exitCode
                         ) + "\r\n")
                     }
                 }
-                session.onTransportFinished(0)
+                session.onTransportFinished(exitCode)
             } catch (e: Exception) {
                 if (!established) {
                     // 连不上（DNS / 网络 / 认证 / 主机密钥被拒）：按"连接失败"上报，界面据此给出改配置的出路。
@@ -215,7 +218,9 @@ class SshTransport(
      * 带外执行命令并返回 stdout（tmux 侧通道管理用）：在已建立的 [ssh] 连接上开新 exec 通道，静默、不占前台 PTY。
      * 未连上/已关闭返回 null（调用方据此判定"尚未就绪、可重试"）；跑通但无输出返回空串；异常返回 null。
      */
-    override fun exec(command: String): String? {
+    override fun exec(command: String): String? = exec(command, 10_000)
+
+    override fun exec(command: String, timeoutMillis: Long): String? {
         val client = ssh ?: return null
         if (closed) return null
         return runCatching {
@@ -223,7 +228,7 @@ class SshTransport(
                 val cmd = s.exec(command)
                 // 先等远端命令结束；超时后主动关通道并返回失败。旧实现先 readBytes 再 join，
                 // 命令若不结束会永久卡在读取处，所谓 10 秒超时实际上永远走不到。
-                cmd.join(10, java.util.concurrent.TimeUnit.SECONDS)
+                cmd.join(timeoutMillis.coerceIn(1_000, 120_000), java.util.concurrent.TimeUnit.MILLISECONDS)
                 if (cmd.isOpen) {
                     runCatching { cmd.close() }
                     null

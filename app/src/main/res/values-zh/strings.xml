@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Modified for Resume Terminal (personal Moke fork), 2026-10-01. Original copyright and licenses retained; see COPYRIGHT.md. -->
 <!-- 中文（简体）。默认/兜底为 values/strings.xml（英文）。 -->
 <resources>
-    <string name="app_name">Moke</string>
-    <string name="app_title">Moke · 墨客</string>
+    <string name="ssh_auth_failed">SSH 登录认证失败：%1$s。请核对远端账户名和密码或私钥；WSL 使用 Linux 账户名。</string>
+    <string name="app_name">续端</string>
+    <string name="app_title">续端 · Resume Terminal</string>
 
     <!-- 通用动作 -->
     <string name="action_back">返回</string>
@@ -30,6 +32,41 @@
     <string name="group_expand">展开分组</string>
     <string name="tmux_title">tmux 会话</string>
     <string name="tmux_open">tmux 会话</string>
+    <string name="zmx_title">持久终端</string>
+    <string name="zmx_temporary_title">临时 shell</string>
+    <string name="zmx_open">持久终端</string>
+    <string name="zmx_new">新建终端</string>
+    <string name="zmx_empty">还没有持久终端</string>
+    <string name="zmx_name_hint">终端名称</string>
+    <string name="zmx_checking">正在读取终端…</string>
+    <string name="zmx_not_installed">配套程序尚不可用。可以继续使用临时 shell，也可以安装后新建持久终端。</string>
+    <string name="zmx_install_scope">适用于 Linux x86_64 / ARM64。从 zmx.sh 下载并校验 zmx 0.8.1，安装到当前 SSH 用户目录，并添加 ~/.local/bin/remote-work。无需 sudo；当前 shell 仍是临时的。</string>
+    <string name="zmx_install">安装并启用</string>
+    <string name="zmx_installing">正在安装配套程序…可以继续使用 shell。</string>
+    <string name="zmx_install_success">配套已就绪。请在下面新建持久终端；当前临时 shell 及其中的程序保持原样。电脑端可用 ~/.local/bin/remote-work 项目名。</string>
+    <string name="zmx_install_system">自动安装仅支持 Linux；这台主机可以继续使用临时 shell。</string>
+    <string name="zmx_install_architecture">自动安装支持 x86_64 和 ARM64；其他架构需要手动安装对应版本的 zmx。</string>
+    <string name="zmx_install_dependency">主机缺少必要命令。请在电脑端安装下面提示的命令，然后重试。</string>
+    <string name="zmx_install_write">SSH 用户无法写入安装目录。请检查目录权限、剩余空间和挂载选项后重试。</string>
+    <string name="zmx_install_conflict">主机上已有其他 remote-work 命令。请先改名或手动安装配套，避免覆盖。</string>
+    <string name="zmx_install_download">下载失败。请检查主机联网、DNS、代理和 CA 证书后重试。</string>
+    <string name="zmx_install_checksum">下载文件校验失败，未安装。请重试，或手动安装经过校验的版本。</string>
+    <string name="zmx_runtime_error">zmx 无法正常运行。请检查二进制兼容性、noexec 挂载限制和终端目录权限。</string>
+    <string name="zmx_install_failed">安装未完成，或 SSH 返回结果丢失。请先刷新确认是否已装好，必要时重试；临时 shell 仍可使用。</string>
+    <string name="zmx_keep_plain_shell">继续使用临时 shell</string>
+    <string name="zmx_plain_hint">当前为临时 shell，断线后可能丢失工作现场。</string>
+    <string name="zmx_setup">配置持久终端</string>
+    <string name="zmx_control_unavailable">无法读取远端终端，请检查连接后重试。</string>
+    <string name="zmx_invalid_response">无法识别远端 zmx 的返回结果。</string>
+    <string name="zmx_kill_confirm">要关闭“%1$s”及其中正在运行的程序吗？此操作无法撤销。</string>
+    <string name="zmx_current">当前</string>
+    <string name="zmx_open_session">打开</string>
+    <string name="zmx_stop">关闭</string>
+    <string name="zmx_picker_prompt">接着使用电脑或手机上的终端，也可以新建一个。</string>
+    <string name="zmx_plain_shell">打开临时 shell</string>
+    <string name="zmx_disconnected">连接已结束，可从持久终端列表重进。</string>
+    <string name="close_zmx_connection_confirm">断开「%1$s」？如持久终端仍在运行，可从列表重新进入。</string>
+    <string name="zmx_client_count">%1$d 台设备已连接</string>
     <string name="tmux_new">新建会话</string>
     <string name="tmux_attach">打开</string>
     <string name="tmux_resume">恢复</string>
@@ -164,12 +201,21 @@
     <!-- 附加键 / 文本段 -->
     <string name="key_text">文本</string>
     <string name="key_more">更多按键</string>
+    <string name="key_paste">粘贴（Ctrl+V）</string>
+    <string name="key_interrupt">中断任务（Ctrl+C）</string>
+    <string name="key_interrupt_label">中断</string>
+    <string name="clipboard_empty">剪贴板没有可粘贴的文字</string>
     <string name="keys_panel_collapse">收起</string>
+    <string name="keys_show_all">全部按键</string>
+    <string name="keys_show_less">收起扩展按键</string>
+    <string name="modifier_off">已关闭；点按用于下一键，长按锁定</string>
+    <string name="modifier_once">仅下一键有效；点按取消</string>
+    <string name="modifier_locked">已锁定；点按取消</string>
+    <string name="modifier_lock_feedback">%1$s 已锁定 · 点按取消</string>
     <string name="keys_section_edit">编辑</string>
     <string name="keys_section_fn">功能键</string>
     <string name="keys_section_ctrl">控制键</string>
-    <string name="composer_title">文本段输入</string>
-    <string name="composer_field">要发送的内容</string>
+    <string name="composer_field">输入命令或提问</string>
     <string name="composer_clear">清空</string>
     <string name="composer_send">发送</string>
     <string name="composer_send_enter">发送并回车</string>
@@ -212,14 +258,14 @@
 
     <!-- 关于 -->
     <string name="about_title">关于</string>
-    <string name="app_tagline">Android 原生 SSH / mosh 终端</string>
+    <string name="app_tagline">在手机上接着使用 WSL 终端</string>
     <string name="label_version">版本</string>
     <string name="check_update">检查更新</string>
     <string name="up_to_date">已是最新</string>
     <string name="new_version">新版 %1$s</string>
     <string name="retry_with_msg">重试（%1$s）</string>
     <string name="licenses_header">开源与许可</string>
-    <string name="licenses_body">本应用基于多个开源项目构建，完整许可清单见项目 THIRD_PARTY_NOTICES。</string>
+    <string name="licenses_body">基于 Moke（GPL-3.0-or-later）、Termux 终端组件（Apache-2.0）与 zmx（MIT）；详见 THIRD_PARTY_NOTICES。</string>
 
     <!-- ViewModel / 数据 -->
     <string name="license_local">本地</string>
@@ -362,6 +408,9 @@
     <string name="host_persistence">会话持久化</string>
     <string name="persistence_none">无</string>
     <string name="persistence_tmux">tmux（连接即进入）</string>
+    <string name="persistence_zmx">持久终端（zmx）</string>
+    <string name="host_zmx_hint">断线后，Linux 主机中的程序和画面继续保留。需要 zmx，可在 SSH 连上后从持久终端面板安装。</string>
+    <string name="startup_command_persistence_note">会话持久化会占用此启动位置。</string>
     <string name="host_persistence_hint">选 tmux：连接这台主机时自动进入 tmux 会话——已记住会话名就直接进入，否则先让你选一个。</string>
     <string name="scroll_none_mosh">mosh 协议不传输滚动缓冲，这里没有可滚的历史。在远端用 tmux（或改用 SSH）即可滚屏。</string>
     <string name="scroll_none_alt">全屏程序正占用整个屏幕，没有可滚的历史。</string>
@@ -374,7 +423,9 @@
     <string name="scroll_mode_hint">智能（推荐）：远端开了鼠标滚动就发滚轮；普通输出滚本地历史；判不出来时什么都不发，避免方向键去翻命令历史。\n始终发滚轮：远端支持鼠标但当前界面没开启跟踪时可试。\n始终发方向键：翻页器（less、man、vim）滚不动时用它——尤其是 mosh 会话，mosh 不传递前台程序信息，只能由你指定。</string>
     <string name="include_prerelease">包含预览版</string>
     <string name="include_prerelease_sub">检查更新时也算上 rc 预览版。预览版用于抢先验证新功能，可能不稳定。</string>
-    <string name="github_repo">GitHub 仓库</string>
+    <string name="github_repo">Moke 上游源码</string>
+    <string name="fork_github_repo">续端源码与反馈</string>
+    <string name="about_fork_description">基于 briqt 的 Moke 改进，按个人 Linux / WSL 开发习惯特化。原有客户端与主要功能来自 Moke，并非完全原创，也不是 Moke 官方版本。保留上游版权与 GPL-3.0-or-later 许可。</string>
 
     <!-- 0.1.20：凭据存储 / 连接反馈 / 字体说明 -->
     <string name="hosts_unreadable_title">保存的连接无法解密</string>
@@ -402,6 +453,7 @@
     <string name="term_connect_failed">[连接失败: %1$s]</string>
     <string name="term_session_ended">[会话结束]</string>
     <string name="term_left_tmux">[已离开 tmux]</string>
+    <string name="term_left_zmx">[已离开持久终端]</string>
     <string name="term_session_ended_code">[会话结束 (code %1$d)]</string>
     <string name="term_session_ended_signal">[会话结束 (signal %1$d)]</string>
     <string name="font_no_url">该字体没有下载地址</string>
@@ -452,4 +504,18 @@
     <string name="alert_channel_desc">远端程序响铃或发出通知时提醒你</string>
     <string name="menu_terminal_alerts">响铃与通知提醒</string>
     <string name="menu_terminal_alerts_sub">远端程序响铃或发出通知序列（OSC 9 / 777）时，如果你不在这个会话里，用系统通知提醒你</string>
+    <string name="composer_prompt">多行提问 / 长文本</string>
+    <string name="composer_command_mode">切回单行命令</string>
+    <string name="composer_multiline_mode">展开多行输入</string>
+    <string name="composer_multiline_hint">换行编辑 · 箭头发送并回车</string>
+
+    <string name="quick_shortcut_configure">常用键：%1$s · 更换</string>
+    <string name="quick_shortcut_title">选择常用键</string>
+    <string name="quick_shortcut_hint">选择会保存并用于所有连接。其他组合可直接使用常驻的 Ctrl、Alt 和 Shift。</string>
+    <string name="quick_shortcut_close">关闭</string>
+    <string name="codex_model_command">模型 / 强度 · /model</string>
+    <string name="codex_resume_command">恢复对话 · /resume</string>
+    <string name="command_restore_draft">草稿已保留 · 恢复</string>
+    <string name="command_draft_busy">已有一份保留的草稿，请先发送或清空当前输入，再切换命令。</string>
+    <string name="quick_shortcut_scroll_hint">上下滑动查看更多选项</string>
 </resources>

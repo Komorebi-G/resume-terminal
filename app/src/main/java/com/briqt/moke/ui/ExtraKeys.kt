@@ -1,6 +1,15 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 package com.briqt.moke.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.runtime.rememberUpdatedState
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,8 +28,27 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import android.view.KeyEvent
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.platform.InterceptPlatformTextInput
+import androidx.compose.ui.platform.PlatformTextInputInterceptor
+import androidx.compose.ui.platform.PlatformTextInputMethodRequest
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -43,11 +71,14 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.briqt.moke.R
 import com.briqt.moke.terminal.KeyId
+import com.briqt.moke.terminal.QuickShortcut
+import com.briqt.moke.terminal.KeySeq
 import com.briqt.moke.terminal.ModKind
 import com.briqt.moke.terminal.ModState
 import com.briqt.moke.terminal.Modifiers
@@ -65,17 +96,18 @@ sealed interface ExtraKey {
     /**
      * 动作键（[id] 交给上层处理）。
      *
-     * 没有 label：这两个键的文案一定要本地化，渲染时按 [id] 取资源（见 KeyRow）。
-     * 早先这里写着中文字面量，虽然从没被渲染过，但看着像是"文案在这里定"，容易被照抄。
+     * 文本和面板入口按 id 本地化；命令按钮可提供紧凑标签。
      */
-    data class Action(val id: String) : ExtraKey {
-        override val label: String get() = ""
-    }
+    data class Action(val id: String, override val label: String = "") : ExtraKey
 }
 
 /** 动作键 id：文本段入口、展开全键盘面板。 */
 const val ACTION_COMPOSER = "composer"
 const val ACTION_PANEL = "panel"
+const val ACTION_MODEL = "model"
+const val ACTION_RESUME = "resume"
+const val ACTION_PASTE = "paste"
+const val ACTION_COPY = "copy"
 
 /*
  * 收录标准（rc.3 重定）：**只放软键盘给不了的键**。
@@ -92,66 +124,66 @@ const val ACTION_PANEL = "panel"
 /**
  * 常驻双排附加键：均匀铺满宽度、不横向滚动，中间三列保持倒 T 方向键。
  *
- * 取舍：Enter/⌫ 让位给 ⇧TAB 与 ^C——前者输入法上永远都在，后者输入法永远给不了；
- * 而 ⇧TAB（切 agent 模式）与 ^C（打断）正是这类会话里按得最多的两个。
+ * 粘贴常驻；Shift+Tab 用修饰键组合。有输出选区时，中断键改为复制。
  */
-val DEFAULT_EXTRA_KEYS: List<List<ExtraKey>> = listOf(
+val DEFAULT_EXTRA_KEYS: List<List<ExtraKey>> = extraKeyRows(QuickShortcut.SHIFT_LEFT)
+
+fun extraKeyRows(shortcut: QuickShortcut, selectingText: Boolean = false): List<List<ExtraKey>> = listOf(
     listOf(
         ExtraKey.Key("ESC", KeyId.Esc),
         ExtraKey.Mod("CTRL", ModKind.Ctrl),
         ExtraKey.Mod("ALT", ModKind.Alt),
         ExtraKey.Key("↑", KeyId.Up),
-        ExtraKey.Key("HOME", KeyId.Home),
-        ExtraKey.Key("END", KeyId.End),
+        ExtraKey.Mod("SHIFT", ModKind.Shift),
+        when (shortcut) {
+            QuickShortcut.MODEL -> ExtraKey.Action(ACTION_MODEL, shortcut.label)
+            QuickShortcut.RESUME -> ExtraKey.Action(ACTION_RESUME, shortcut.label)
+            else -> ExtraKey.Key(shortcut.label, shortcut.key)
+        },
         ExtraKey.Action(ACTION_PANEL),
     ),
     listOf(
         ExtraKey.Key("TAB", KeyId.Tab),
-        ExtraKey.Key("⇧TAB", KeyId.Macro("\u001b[Z")),
+        ExtraKey.Action(ACTION_PASTE, "^V"),
         ExtraKey.Key("←", KeyId.Left),
         ExtraKey.Key("↓", KeyId.Down),
         ExtraKey.Key("→", KeyId.Right),
-        ExtraKey.Key("^C", KeyId.Macro(ctrlOf('c'))),
+        if (selectingText) ExtraKey.Action(ACTION_COPY)
+        else ExtraKey.Key("^C", KeyId.Macro(ctrlOf('c'))),
         ExtraKey.Action(ACTION_COMPOSER),
     ),
 )
 
 /** 全键盘面板的一个分组（面板是单页竖排，分组只作视觉分区，不再有分段切换）。 */
-data class KeySection(val titleRes: Int, val rows: List<List<ExtraKey>>)
+data class KeySection(
+    val titleRes: Int,
+    val rows: List<List<ExtraKey>>,
+    val secondaryRows: List<List<ExtraKey>> = emptyList(),
+)
 
 private fun macro(label: String, bytes: String) = ExtraKey.Key(label, KeyId.Macro(bytes))
 
 /** Ctrl+字母的字节（宏用；标签沿用终端惯例的 `^X` 写法）。 */
 private fun ctrlOf(c: Char) = ((c.uppercaseChar().code - 64)).toChar().toString()
 
-/**
- * 面板的三个分组：编辑 / 功能键 / 控制键。**一屏全在，不用切**。
- *
- * rc.2 是四分段 pager，每段行数还不一样：翻页时 Surface 的高度与页内内容各按各的节奏变，
- * 看上去就是"卡"和"边框与内容不同步"。键收敛到 33 个之后一页放得下，分段机制连同它那套
- * 滑动/高度动画一起去掉——不做的动画不会卡。
- */
+/** 常用编辑键默认可见；低频控制键和功能键在“全部按键”中展开。 */
 val KEY_SECTIONS: List<KeySection> = listOf(
     KeySection(
         R.string.keys_section_edit,
         listOf(
             listOf(
-                ExtraKey.Mod("SHIFT", ModKind.Shift),
-                ExtraKey.Key("INS", KeyId.Insert),
-                ExtraKey.Key("DEL", KeyId.Delete),
+                ExtraKey.Key("END", KeyId.End),
+                ExtraKey.Key("HOME", KeyId.Home),
                 ExtraKey.Key("PgUp", KeyId.PageUp),
                 ExtraKey.Key("PgDn", KeyId.PageDown),
+            ),
+            listOf(
+                ExtraKey.Key("INS", KeyId.Insert),
+                ExtraKey.Key("DEL", KeyId.Delete),
                 // Enter/⌫ 输入法上有，这里留一份是给"隐藏软键盘只看输出"的场景兜底。
                 ExtraKey.Key("⌫", KeyId.Backspace),
                 ExtraKey.Key("Enter", KeyId.Enter),
             ),
-        ),
-    ),
-    KeySection(
-        R.string.keys_section_fn,
-        listOf(
-            (1..6).map { ExtraKey.Key("F$it", KeyId.Fn(it)) },
-            (7..12).map { ExtraKey.Key("F$it", KeyId.Fn(it)) },
         ),
     ),
     KeySection(
@@ -164,20 +196,30 @@ val KEY_SECTIONS: List<KeySection> = listOf(
                 macro("^U", ctrlOf('u')),
                 macro("^K", ctrlOf('k')),
                 macro("^W", ctrlOf('w')),
-                macro("^Y", ctrlOf('y')),
+                macro("^R", ctrlOf('r')),
                 macro("^L", ctrlOf('l')),
             ),
-            // 作业控制与历史；^B 是 tmux 默认前缀；ALT↵ = ESC+CR（多行输入换行不提交）。
+        ),
+        secondaryRows = listOf(
+            // Less frequent controls only appear after expanding all keys.
             listOf(
                 macro("^D", ctrlOf('d')),
                 macro("^Z", ctrlOf('z')),
-                macro("^R", ctrlOf('r')),
+                macro("^Y", ctrlOf('y')),
                 macro("^P", ctrlOf('p')),
                 macro("^N", ctrlOf('n')),
                 macro("^B", ctrlOf('b')),
                 // 标签不用 ⌥：等宽字体里没有该字形，真机上会渲染成豆腐块。
                 macro("ALT↵", "\u001b\r"),
             ),
+        ),
+    ),
+    KeySection(
+        R.string.keys_section_fn,
+        rows = emptyList(),
+        secondaryRows = listOf(
+            (1..6).map { ExtraKey.Key("F$it", KeyId.Fn(it)) },
+            (7..12).map { ExtraKey.Key("F$it", KeyId.Fn(it)) },
         ),
     ),
 )
@@ -187,9 +229,11 @@ fun ExtraKeys(
     rows: List<List<ExtraKey>>,
     mods: Modifiers,
     panelOpen: Boolean = false,
+    composerOpen: Boolean = false,
     onKey: (KeyId) -> Unit,
     onToggleMod: (ModKind) -> Unit,
     onAction: (String) -> Unit,
+    onLockMod: (ModKind) -> Unit,
 ) {
     Surface(color = MaterialTheme.colorScheme.surface) {
         Column(
@@ -197,7 +241,7 @@ fun ExtraKeys(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             rows.forEach { row ->
-                KeyRow(row, mods, panelOpen, onKey, onToggleMod, onAction)
+                KeyRow(row, mods, panelOpen, onKey, onToggleMod, onAction, composerOpen, onLockMod)
             }
         }
     }
@@ -211,16 +255,29 @@ private fun KeyRow(
     onKey: (KeyId) -> Unit,
     onToggleMod: (ModKind) -> Unit,
     onAction: (String) -> Unit,
+    composerOpen: Boolean = false,
+    onLockMod: (ModKind) -> Unit = {},
 ) {
+    val pasteDescription = stringResource(R.string.key_paste)
+    val interruptDescription = stringResource(R.string.key_interrupt)
+    val modOff = stringResource(R.string.modifier_off)
+    val modOnce = stringResource(R.string.modifier_once)
+    val modLocked = stringResource(R.string.modifier_locked)
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         row.forEach { key ->
             val state = if (key is ExtraKey.Mod) mods.state(key.kind) else ModState.Off
             // 「文本段」与「更多」用图标（与符号键风格一致、无需 i18n）；本地化文案作无障碍描述。
             val isComposer = key is ExtraKey.Action && key.id == ACTION_COMPOSER
             val isPanel = key is ExtraKey.Action && key.id == ACTION_PANEL
+            val isPaste = key is ExtraKey.Action && key.id == ACTION_PASTE
+            val isCopy = key is ExtraKey.Action && key.id == ACTION_COPY
+            val isInterrupt = key is ExtraKey.Key && key.key == KeyId.Macro("\u0003")
             val label = when {
                 isComposer -> stringResource(R.string.key_text)
                 isPanel -> stringResource(R.string.key_more)
+                isCopy -> stringResource(R.string.copy_text)
+                isPaste -> stringResource(R.string.paste_text)
+                isInterrupt -> stringResource(R.string.key_interrupt_label)
                 else -> key.label
             }
             KeyCap(
@@ -231,9 +288,18 @@ private fun KeyRow(
                     else -> null
                 },
                 // 一次性修饰用主色实心，锁定态用更强的色块区分——否则分不清"这次有效"和"一直有效"。
-                active = state.active || (isPanel && panelOpen),
+                active = state.active || (isPanel && panelOpen) || (isComposer && composerOpen),
                 locked = state == ModState.Locked,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).semantics {
+                    if (isPaste) contentDescription = pasteDescription
+                    if (isInterrupt) contentDescription = interruptDescription
+                    if (key is ExtraKey.Mod) stateDescription = when (state) {
+                        ModState.Off -> modOff
+                        ModState.Once -> modOnce
+                        ModState.Locked -> modLocked
+                    }
+                },
+                repeatable = key is ExtraKey.Key && key.key in listOf(KeyId.Up, KeyId.Down, KeyId.Left, KeyId.Right, KeyId.Backspace, KeyId.Delete, KeyId.PageUp, KeyId.PageDown),
                 onClick = {
                     when (key) {
                         is ExtraKey.Key -> onKey(key.key)
@@ -241,6 +307,7 @@ private fun KeyRow(
                         is ExtraKey.Action -> onAction(key.id)
                     }
                 },
+                onLongClick = if (key is ExtraKey.Mod) ({ onLockMod(key.kind) }) else null,
             )
         }
     }
@@ -262,8 +329,12 @@ fun KeyboardPanel(
     onToggleMod: (ModKind) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    quickShortcut: QuickShortcut = QuickShortcut.SHIFT_LEFT,
+    onConfigureShortcut: () -> Unit = {},
+    onCommand: (String) -> Unit = {},
 ) {
     val config = LocalConfiguration.current
+    var allKeys by remember { mutableStateOf(false) }
     // 最高只吃屏幕的 6 成：再高就把终端整块盖没了。父 Box 更矮时由父约束接管，内容滚动。
     val maxHeight = (config.screenHeightDp * 0.6f).dp
     // 横屏矮而宽：竖屏的 5 排在这里放不下（只能滚），但一排塞得下十几个键——
@@ -299,37 +370,75 @@ fun KeyboardPanel(
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
                 ) {}
             }
+            Row(Modifier.fillMaxWidth()) {
+                if (quickShortcut != QuickShortcut.MODEL) TextButton(onClick = { onCommand("/model") }, modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.codex_model_command))
+                }
+                if (quickShortcut != QuickShortcut.RESUME) TextButton(onClick = { onCommand("/resume") }, modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.codex_resume_command))
+                }
+            }
+            TextButton(onClick = { allKeys = !allKeys }, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(if (allKeys) R.string.keys_show_less else R.string.keys_show_all))
+            }
             sections.forEachIndexed { index, section ->
+                val visibleRows = section.rows + if (allKeys) section.secondaryRows else emptyList()
+                if (visibleRows.isEmpty()) return@forEachIndexed
                 Text(
                     stringResource(section.titleRes),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 3.dp, top = if (index == 0) 0.dp else 9.dp, bottom = 4.dp),
                 )
-                val rows = if (perRow > 0) section.rows.flatten().chunked(perRow) else section.rows
+                val rows = if (perRow > 0) visibleRows.flatten().chunked(perRow) else visibleRows
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
                     rows.forEach { row ->
                         KeyRow(row, mods, panelOpen = false, onKey = onKey, onToggleMod = onToggleMod, onAction = {})
                     }
                 }
             }
+            if (allKeys) TextButton(onClick = onConfigureShortcut, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.quick_shortcut_configure, quickShortcut.title))
+            }
         }
     }
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun KeyCap(
     label: String,
     active: Boolean,
+    modifier: Modifier = Modifier,
     locked: Boolean = false,
     icon: ImageVector? = null,
-    modifier: Modifier = Modifier,
+    repeatable: Boolean = false,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
 ) {
-    // 近乎平直的键帽（微圆角），更贴合终端页面；高度 34dp（在 36 基础上再压扁约 5%）。
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val currentClick by rememberUpdatedState(onClick)
+    var repeated by remember { mutableStateOf(false) }
+    LaunchedEffect(pressed, repeatable) {
+        if (pressed && repeatable) {
+            repeated = false
+            delay(400)
+            while (true) {
+                repeated = true
+                currentClick()
+                delay(75)
+            }
+        }
+    }
+    // Give a thumb more vertical room while preserving two visible rows above the IME.
     Surface(
-        onClick = onClick,
-        modifier = modifier.height(34.dp),
+        modifier = modifier.height(42.dp).combinedClickable(
+            interactionSource = interaction,
+            indication = LocalIndication.current,
+            onClick = { if (!repeated) currentClick(); repeated = false },
+            onLongClick = onLongClick,
+        ),
         shape = MokeShapes.keycap,
         color = when {
             locked -> MaterialTheme.colorScheme.tertiary
@@ -351,60 +460,148 @@ private fun KeyCap(
                 val glyph = label.length == 1 && label[0] in "↑↓←→"
                 Text(label, fontFamily = MokeMono, fontSize = if (glyph) 17.sp else 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
             }
+            if (locked) Icon(Icons.Filled.Lock, contentDescription = null,
+                modifier = Modifier.align(Alignment.TopEnd).padding(2.dp).size(10.dp))
         }
     }
 }
 
-/**
- * 文本段输入（底部**内联**输入条）：在附加键行的位置就地展开，编辑整段文本后一次性发送——适合长命令 / 多行粘贴。
- * 与终端同处一个窗口，从终端切到本输入框只是窗口内焦点转移，软键盘**不收起再弹起**（避免弹独立 sheet 的三段跳）。
- * 文本状态由上层持有（[value]），关闭保留草稿、发送后由上层清空。展开即自动聚焦。
- */
+/** Compact command draft with an optional multiline prompt editor. Shortcut rows stay visible. */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun TextBlockComposer(
-    value: String,
-    onValueChange: (String) -> Unit,
+    value: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
     onDismiss: () -> Unit,
-    onSend: (text: String, appendEnter: Boolean) -> Unit,
+    onSend: (appendEnter: Boolean) -> Unit,
+    onKey: (KeyId, ctrl: Boolean, alt: Boolean, shift: Boolean) -> Unit,
+    focusRequester: FocusRequester,
+    isDraftEmpty: () -> Boolean,
+    onPaste: () -> Unit,
+    onCopy: () -> Unit,
+    outputSelected: Boolean,
 ) {
-    val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
+    var multiline by remember { mutableStateOf(false) }
+    var clipboardCopyKeyDown by remember { mutableStateOf(false) }
+    val expanded = multiline || value.text.contains('\n')
+    val currentEmpty by rememberUpdatedState(isDraftEmpty)
+    val currentKey by rememberUpdatedState(onKey)
+    // Keep the interceptor identity stable: recreating it tears down the active IME session.
+    val inputInterceptor = remember {
+        PlatformTextInputInterceptor { request, nextHandler ->
+            nextHandler.startInputMethod(object : PlatformTextInputMethodRequest {
+                override fun createInputConnection(outAttributes: EditorInfo): InputConnection {
+                    val target = request.createInputConnection(outAttributes)
+                    outAttributes.imeOptions = outAttributes.imeOptions or EditorInfo.IME_FLAG_NO_EXTRACT_UI or
+                        EditorInfo.IME_FLAG_NO_FULLSCREEN
+                    if (android.os.Build.VERSION.SDK_INT >= 26) {
+                        outAttributes.imeOptions = outAttributes.imeOptions or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+                    }
+                    return DraftInputConnection(target, { currentEmpty() },
+                        { key -> currentKey(key, false, false, false) })
+                }
+            })
+        }
+    }
     Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            // 头行：标题 + 清空 + 关闭（关闭回到附加键行）。
+        Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    stringResource(R.string.composer_title),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(onClick = { onValueChange("") }) { Text(stringResource(R.string.composer_clear)) }
+                Box(Modifier.weight(1f)) {
+                    InterceptPlatformTextInput(inputInterceptor) {
+                        OutlinedTextField(
+                            value = value,
+                            onValueChange = onValueChange,
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 144.dp).focusRequester(focusRequester)
+                                .onPreviewKeyEvent { event ->
+                                    val native = event.nativeKeyEvent
+                                    if (native.keyCode == KeyEvent.KEYCODE_C && native.action == KeyEvent.ACTION_UP)
+                                        clipboardCopyKeyDown = false
+                                    if (native.action != KeyEvent.ACTION_DOWN) return@onPreviewKeyEvent false
+                                    if (native.keyCode == KeyEvent.KEYCODE_C) {
+                                        if (clipboardCopyKeyDown && native.repeatCount > 0) return@onPreviewKeyEvent true
+                                        if (native.repeatCount == 0) clipboardCopyKeyDown = false
+                                    }
+                                    // Clipboard shortcuts belong to the local draft, never the remote process.
+                                    if (native.isCtrlPressed && !native.isAltPressed) {
+                                        if (value.text.isNotEmpty() && native.keyCode in listOf(
+                                                KeyEvent.KEYCODE_A, KeyEvent.KEYCODE_Z, KeyEvent.KEYCODE_Y) ||
+                                            !value.selection.collapsed && native.keyCode == KeyEvent.KEYCODE_X) {
+                                            return@onPreviewKeyEvent false // Local select-all, undo/redo and cut.
+                                        }
+                                        if (native.keyCode == KeyEvent.KEYCODE_V) {
+                                            if (native.repeatCount == 0) onPaste()
+                                            return@onPreviewKeyEvent true
+                                        }
+                                        if (native.keyCode == KeyEvent.KEYCODE_C &&
+                                            (!value.selection.collapsed || outputSelected || native.isShiftPressed)) {
+                                            clipboardCopyKeyDown = true
+                                            if (native.repeatCount == 0) onCopy()
+                                            return@onPreviewKeyEvent true
+                                        }
+                                    }
+                                    val key = when (native.keyCode) {
+                                        KeyEvent.KEYCODE_TAB -> KeyId.Tab
+                                        KeyEvent.KEYCODE_ESCAPE -> KeyId.Esc
+                                        KeyEvent.KEYCODE_DEL -> if (isDraftEmpty()) KeyId.Backspace else null
+                                        KeyEvent.KEYCODE_FORWARD_DEL -> if (isDraftEmpty()) KeyId.Delete else null
+                                        KeyEvent.KEYCODE_ENTER -> if (!expanded || native.isAltPressed || native.isCtrlPressed || native.isShiftPressed) KeyId.Enter else null
+                                        KeyEvent.KEYCODE_DPAD_UP -> if (native.isAltPressed || native.isCtrlPressed) KeyId.Up else null
+                                        KeyEvent.KEYCODE_DPAD_DOWN -> if (native.isAltPressed || native.isCtrlPressed) KeyId.Down else null
+                                        KeyEvent.KEYCODE_DPAD_LEFT -> if (native.isAltPressed || native.isCtrlPressed || native.isShiftPressed) KeyId.Left else null
+                                        KeyEvent.KEYCODE_DPAD_RIGHT -> if (native.isAltPressed || native.isCtrlPressed || native.isShiftPressed) KeyId.Right else null
+                                        in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> if (native.isCtrlPressed || native.isAltPressed)
+                                            KeyId.Chars(('a'.code + native.keyCode - KeyEvent.KEYCODE_A).toChar().toString()) else null
+                                        else -> null
+                                    }
+                                    if (key == null) false else {
+                                        onKey(key, native.isCtrlPressed, native.isAltPressed, native.isShiftPressed)
+                                        true
+                                    }
+                                },
+                            singleLine = !expanded,
+                            minLines = if (expanded) 2 else 1,
+                            placeholder = { Text(stringResource(if (expanded) R.string.composer_prompt else R.string.composer_field), maxLines = 1) },
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = MokeMono),
+                            keyboardOptions = KeyboardOptions(
+                                capitalization = KeyboardCapitalization.None,
+                                autoCorrectEnabled = false,
+                                imeAction = if (expanded) ImeAction.Default else ImeAction.Send,
+                            ),
+                            keyboardActions = KeyboardActions(onSend = { onSend(true) }),
+                            leadingIcon = {
+                                IconButton(onClick = { multiline = !multiline }) {
+                                    Icon(Icons.Filled.EditNote, contentDescription = stringResource(
+                                        if (expanded) R.string.composer_command_mode else R.string.composer_multiline_mode),
+                                        tint = if (expanded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            },
+                            trailingIcon = {
+                                IconButton(onClick = { onSend(true) }) {
+                                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.composer_send_enter))
+                                }
+                            },
+                        )
+                    }
+                }
                 IconButton(onClick = onDismiss) {
-                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close))
                 }
             }
-            // 高度受限：2 行起，内容多则框内滚动到上限，不顶出发送按钮。
-            OutlinedTextField(
-                value = value,
-                onValueChange = onValueChange,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp, max = 160.dp).focusRequester(focusRequester),
-                minLines = 2,
-                placeholder = { Text(stringResource(R.string.composer_field)) },
-                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = MokeMono),
-            )
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Spacer(Modifier.weight(1f))
-                OutlinedButton(onClick = { onSend(value, false) }) { Text(stringResource(R.string.composer_send)) }
-                Button(onClick = { onSend(value, true) }) { Text(stringResource(R.string.composer_send_enter)) }
+            if (expanded) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.composer_multiline_hint), style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { onValueChange(TextFieldValue()) }, enabled = value.text.isNotEmpty()) {
+                        Text(stringResource(R.string.composer_clear))
+                    }
+                    TextButton(onClick = { onSend(false) }, enabled = value.text.isNotEmpty()) {
+                        Text(stringResource(R.string.composer_send))
+                    }
+                }
             }
         }
     }
-    // 内联展开：直接聚焦输入框（同窗口焦点转移，IME 顺滑续上），无需等窗口入场动画。
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
         keyboard?.show()
@@ -436,4 +633,27 @@ fun ExtraKeysRestoreHandle(onRestore: () -> Unit) {
             ) {}
         }
     }
+}
+
+
+@Composable
+fun QuickShortcutDialog(selected: QuickShortcut, onDismiss: () -> Unit, onSelect: (QuickShortcut) -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.quick_shortcut_title)) },
+        text = {
+            Column {
+                Text(stringResource(R.string.quick_shortcut_hint), style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.quick_shortcut_scroll_hint), style = MaterialTheme.typography.bodySmall)
+                Column(Modifier.heightIn(max = 280.dp).verticalScroll(rememberScrollState())) {
+                    QuickShortcut.entries.forEach { shortcut ->
+                        TextButton(onClick = { onSelect(shortcut) }, modifier = Modifier.fillMaxWidth()) {
+                            Text((if (shortcut == selected) "✓ " else "") + shortcut.title)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.quick_shortcut_close)) } },
+    )
 }

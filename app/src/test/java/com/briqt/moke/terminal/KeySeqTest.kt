@@ -1,3 +1,5 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 package com.briqt.moke.terminal
 
 import org.junit.Assert.assertEquals
@@ -38,6 +40,7 @@ class KeySeqTest {
         assertEquals("$e[1;5D", KeySeq.encode(KeyId.Left, ctrl = true))
         assertEquals("$e[1;3C", KeySeq.encode(KeyId.Right, alt = true))
         assertEquals("$e[1;2A", KeySeq.encode(KeyId.Up, shift = true))
+        assertEquals("$e[1;3A", KeySeq.encode(KeyId.Up, alt = true))
         assertEquals("$e[1;5H", KeySeq.encode(KeyId.Home, ctrl = true))
     }
 
@@ -58,8 +61,10 @@ class KeySeqTest {
     @Test
     fun `Alt+Enter 发 ESC 加回车`() {
         assertEquals("$e\r", KeySeq.encode(KeyId.Enter, alt = true))
-        // Shift+Enter 无通行编码，保持普通回车而不是编出一个远端不认识的序列。
-        assertEquals("\r", KeySeq.encode(KeyId.Enter, shift = true))
+        // Never turn a request for a modified Enter into an ordinary submission.
+        assertEquals("$e[13;2u", KeySeq.encode(KeyId.Enter, shift = true))
+        assertEquals("$e[13;5u", KeySeq.encode(KeyId.Enter, ctrl = true))
+        assertEquals("$e[13;8u", KeySeq.encode(KeyId.Enter, ctrl = true, alt = true, shift = true))
     }
 
     @Test

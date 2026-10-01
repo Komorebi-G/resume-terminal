@@ -1,3 +1,5 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 package com.termux.terminal;
 
 import java.io.UnsupportedEncodingException;
@@ -141,6 +143,16 @@ public class TerminalTest extends TerminalTestCase {
 		selectGraphicsTestRun(':');
 	}
 
+	public void testPasteCannotInjectInterruptExitOrEscapeControls() {
+		withTerminalSized(80, 24);
+		String clipboard = "a\u0003\u0004\u001a\u001b\u007f\u009b\tb\r\n中文🙂";
+		mTerminal.paste(clipboard);
+		assertEquals("a\tb\r中文🙂", mOutput.getOutputAndClear());
+		enterString("\033[?2004h");
+		mTerminal.paste(clipboard);
+		assertEquals("\033[200~a\tb\r中文🙂\033[201~", mOutput.getOutputAndClear());
+	}
+
 	public void selectGraphicsTestRun(char separator) {
 		withTerminalSized(5, 5);
 		enterString("\033[31m");
@@ -245,6 +257,15 @@ public class TerminalTest extends TerminalTestCase {
 		enterString("\033[0;38:2:255:127:2:48:2:1:2:254m");
 		assertEquals(expectedForeground, mTerminal.mForeColor);
 		assertEquals(TextStyle.COLOR_INDEX_BACKGROUND, mTerminal.mBackColor);
+	}
+
+	/** A Codex/DSH-style coloured Unicode frame must retain both glyphs and RGB colour. */
+	public void testUnicodeFrameWithChineseAndTrueColor() {
+		withTerminalSized(10, 4)
+			.enterString("\033[38;2;68;204;170m╭──────╮\r\n│中文  │\r\n╰──────╯\033[0m")
+			.assertLinesAre("╭──────╮  ", "│中文  │  ", "╰──────╯  ", "          ");
+		assertEquals(0xff44ccaa, TextStyle.decodeForeColor(getStyleAt(0, 0)));
+		assertEquals(0xff44ccaa, TextStyle.decodeForeColor(getStyleAt(1, 1)));
 	}
 
 	public void testBackgroundColorErase() {

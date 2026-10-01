@@ -1,3 +1,5 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 package com.briqt.moke.data
 
 import org.json.JSONObject
@@ -9,7 +11,7 @@ enum class AuthType { PASSWORD, KEY }
  * 会话持久化：连接这台主机时是否自动接入多路复用器。
  * [NONE] 与历史行为一致（普通登录壳）；[TMUX] 连接即进 tmux（存在则附加、不存在则创建）。
  */
-enum class SessionPersistence { NONE, TMUX }
+enum class SessionPersistence { NONE, TMUX, ZMX }
 
 /** 连接主机配置。v0.1 持久化在 DataStore（明文 JSON），后续再上安全存储。 */
 data class Host(
@@ -45,6 +47,8 @@ data class Host(
      * [SessionPersistence.TMUX] 下：非空则连接时直接按名附加；空则先开普通壳并弹选择器。
      */
     val tmuxSessionName: String = "",
+    /** Last zmx session selected on this host. */
+    val zmxSessionName: String = "",
     /** 连接后自动转发的远端端口（用户原文，如 "5173, 8080"；解析见 `PortForwards.parsePorts`）。 */
     val forwardPorts: String = "",
 ) {
@@ -68,7 +72,7 @@ data class Host(
      * 用户设的启动命令让位——否则要么覆盖掉 tmux、要么两条命令抢同一个 exec 通道。
      */
     val effectiveStartupCommand: String
-        get() = if (persistence == SessionPersistence.TMUX) "" else startupCommand.trim()
+        get() = if (persistence != SessionPersistence.NONE) "" else startupCommand.trim()
 
     /** 协议短名（连接列表徽标用）。 */
     val protocol: String get() = if (useMosh) "mosh" else "SSH"
@@ -98,6 +102,7 @@ data class Host(
         put("lastConnectedAt", lastConnectedAt)
         put("persistence", persistence.name)
         put("tmuxSessionName", tmuxSessionName)
+        put("zmxSessionName", zmxSessionName)
         put("forwardPorts", forwardPorts)
     }
 
@@ -123,6 +128,7 @@ data class Host(
                 SessionPersistence.valueOf(o.optString("persistence", "NONE"))
             }.getOrDefault(SessionPersistence.NONE),
             tmuxSessionName = o.optString("tmuxSessionName", ""),
+            zmxSessionName = o.optString("zmxSessionName", ""),
             forwardPorts = o.optString("forwardPorts", ""),
         )
     }

@@ -1,3 +1,5 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 package com.termux.terminal;
 
 /**
@@ -40,6 +42,9 @@ public interface TerminalTransport {
      * [moke] 加法式扩展：SSH 复用现有连接；mosh 可按需建立独立 SSH 控制连接。
      */
     default String exec(String command) { return null; }
+
+    /** Longer, bounded side-channel operations such as installing the Linux companion. */
+    default String exec(String command, long timeoutMillis) { return exec(command); }
 
     /** 关闭并释放资源。可重复调用。 */
     void close();

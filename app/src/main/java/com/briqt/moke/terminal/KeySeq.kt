@@ -1,3 +1,5 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 package com.briqt.moke.terminal
 
 /**
@@ -59,9 +61,13 @@ object KeySeq {
                 alt -> "$ESC\t"
                 else -> "\t"
             }
-            // Shift+Enter 无通行编码（各终端自定义）；Alt+Enter 发 ESC+CR，
-            // 是 claude code / codex 这类行编辑 TUI 里"换行但不提交"的常见约定。
-            KeyId.Enter -> if (alt) "$ESC\r" else "\r"
+            // Modified Enter must not silently become a plain submission. CSI-u distinguishes
+            // Shift/Ctrl+Enter in modern TUIs; legacy Alt+Enter remains ESC+CR.
+            KeyId.Enter -> when {
+                shift || ctrl -> "$ESC[13;${mod}u"
+                alt -> "$ESC\r"
+                else -> "\r"
+            }
             // 退格默认发 DEL(0x7f)（与 stty erase 的常规配置一致）；Ctrl 发 BS(0x08)。
             KeyId.Backspace -> when {
                 ctrl -> BS

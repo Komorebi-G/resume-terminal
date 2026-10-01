@@ -1,3 +1,5 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 package com.briqt.moke.data
 
 /** 应用明暗主题：跟随系统 / 强制浅色 / 强制深色。 */
@@ -25,7 +27,7 @@ enum class KeyboardMode {
     SECURE, STANDARD, IME;
 
     companion object {
-        fun fromName(n: String?, def: KeyboardMode = SECURE): KeyboardMode =
+        fun fromName(n: String?, def: KeyboardMode = IME): KeyboardMode =
             entries.firstOrNull { it.name == n } ?: def
     }
 }

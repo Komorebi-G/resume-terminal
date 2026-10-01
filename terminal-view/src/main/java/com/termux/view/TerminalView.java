@@ -1,10 +1,10 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 package com.termux.view;
 
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.app.Activity;
-import android.content.ClipData;
-import android.content.ClipboardManager;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Typeface;
@@ -14,7 +14,7 @@ import android.os.Looper;
 import android.os.SystemClock;
 import android.text.Editable;
 import android.text.InputType;
-import android.text.TextUtils;
+import android.text.Selection;
 import android.util.AttributeSet;
 import android.view.ActionMode;
 import android.view.HapticFeedbackConstants;
@@ -85,6 +85,7 @@ public final class TerminalView extends View {
 
     /** If non-zero, this is the last unicode code point received if that was a combining character. */
     int mCombiningAccent;
+    private boolean mClipboardCopyKeyDown;
 
     /**
      * The current AutoFill type returned for {@link View#getAutofillType()} by {@link #getAutofillType()}.
@@ -331,12 +332,13 @@ public final class TerminalView extends View {
             }
         } else {
             // Corresponds to android:inputType="text"
-            outAttrs.inputType =  InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_NORMAL;
+            outAttrs.inputType = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_NORMAL
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
         }
 
         // Note that IME_ACTION_NONE cannot be used as that makes it impossible to input newlines using the on-screen
         // keyboard on Android TV (see https://github.com/termux/termux-app/issues/221).
-        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN;
+        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN | EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING;
 
         return new BaseInputConnection(this, true) {
 
@@ -371,13 +373,39 @@ public final class TerminalView extends View {
                     mClient.logInfo(LOG_TAG, "IME: deleteSurroundingText(" + leftLength + ", " + rightLength + ")");
                 }
                 // The stock Samsung keyboard with 'Auto check spelling' enabled sends leftLength > 1.
+                return deletePendingText(leftLength, rightLength, false);
+            }
+
+            @Override
+            public boolean deleteSurroundingTextInCodePoints(int leftLength, int rightLength) {
+                return deletePendingText(leftLength, rightLength, true);
+            }
+
+            private boolean deletePendingText(int leftLength, int rightLength, boolean codePoints) {
+                if (leftLength < 0 || rightLength < 0) return false;
+                // Composing text is still local. Editing a Chinese candidate must not erase
+                // characters already sent to the remote shell. Only the unbuffered remainder
+                // belongs to the terminal. Keep composing spans while editing the buffer.
+                Editable content = getEditable();
+                int anchor = Math.max(0, Selection.getSelectionStart(content));
+                int cursor = Math.max(0, Selection.getSelectionEnd(content));
+                int start = Math.min(anchor, cursor), end = Math.max(anchor, cursor);
+                int availableLeft = codePoints ? Character.codePointCount(content, 0, start) : start;
+                int availableRight = codePoints ? Character.codePointCount(content, end, content.length()) : content.length() - end;
+                int bufferedLeft = Math.min(leftLength, availableLeft);
+                int bufferedRight = Math.min(rightLength, availableRight);
+                int leftIndex = codePoints ? Character.offsetByCodePoints(content, start, -bufferedLeft) : start - bufferedLeft;
+                int rightIndex = codePoints ? Character.offsetByCodePoints(content, end, bufferedRight) : end + bufferedRight;
+                content.delete(end, rightIndex);
+                content.delete(leftIndex, start);
                 KeyEvent deleteKey = new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL);
-                for (int i = 0; i < leftLength; i++) sendKeyEvent(deleteKey);
-                return super.deleteSurroundingText(leftLength, rightLength);
+                for (int i = bufferedLeft; i < leftLength; i++) TerminalView.this.onKeyDown(KeyEvent.KEYCODE_DEL, deleteKey);
+                KeyEvent forwardDelete = new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_FORWARD_DEL);
+                for (int i = bufferedRight; i < rightLength; i++) TerminalView.this.onKeyDown(KeyEvent.KEYCODE_FORWARD_DEL, forwardDelete);
+                return true;
             }
 
             void sendTextToTerminal(CharSequence text) {
-                stopTextSelectionMode();
                 final int textLengthInChars = text.length();
                 for (int i = 0; i < textLengthInChars; i++) {
                     char firstChar = text.charAt(i);
@@ -705,15 +733,7 @@ public final class TerminalView extends View {
                 if (action == MotionEvent.ACTION_DOWN) showContextMenu();
                 return true;
             } else if (event.isButtonPressed(MotionEvent.BUTTON_TERTIARY)) {
-                ClipboardManager clipboardManager = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
-                ClipData clipData = clipboardManager.getPrimaryClip();
-                if (clipData != null) {
-                    ClipData.Item clipItem = clipData.getItemAt(0);
-                    if (clipItem != null) {
-                        CharSequence text = clipItem.coerceToText(getContext());
-                        if (!TextUtils.isEmpty(text)) mEmulator.paste(text.toString());
-                    }
-                }
+                if (action == MotionEvent.ACTION_DOWN) mTermSession.onPasteTextFromClipboard();
             } else if (mEmulator.isMouseTrackingActive()) { // BUTTON_PRIMARY.
                 switch (event.getAction()) {
                     case MotionEvent.ACTION_DOWN:
@@ -859,7 +879,28 @@ public final class TerminalView extends View {
         if (TERMINAL_VIEW_KEY_LOGGING_ENABLED)
             mClient.logInfo(LOG_TAG, "onKeyDown(keyCode=" + keyCode + ", isSystem()=" + event.isSystem() + ", event=" + event + ")");
         if (mEmulator == null) return true;
+        // Resolve clipboard shortcuts before ordinary keys dismiss the selection.
+        if (keyCode == KeyEvent.KEYCODE_C && mClipboardCopyKeyDown && event.getRepeatCount() > 0) return true;
+        if (keyCode == KeyEvent.KEYCODE_C && event.getRepeatCount() == 0) mClipboardCopyKeyDown = false;
+        // Ctrl+C without a selection keeps its terminal interrupt meaning.
+        boolean clipboardControl = (event.isCtrlPressed() || mClient.readControlKey()) &&
+            !event.isAltPressed() && !mClient.readAltKey();
+        if (clipboardControl && keyCode == KeyEvent.KEYCODE_C &&
+            (isSelectingText() || event.isShiftPressed() || mClient.readShiftKey())) {
+            mClipboardCopyKeyDown = true;
+            if (event.getRepeatCount() == 0) copySelectedTextToClipboard();
+            return true;
+        }
+        if (clipboardControl && keyCode == KeyEvent.KEYCODE_V) {
+            if (event.getRepeatCount() == 0) {
+                stopTextSelectionMode(true);
+                mTermSession.onPasteTextFromClipboard();
+            }
+            return true;
+        }
         if (isSelectingText()) {
+            // Pressing Ctrl/Shift first must preserve the selection for the following C.
+            if (KeyEvent.isModifierKey(keyCode)) return true;
             stopTextSelectionMode();
         }
 
@@ -948,6 +989,21 @@ public final class TerminalView extends View {
         final boolean altDown = leftAltDownFromEvent || mClient.readAltKey();
 
         if (mClient.onCodePoint(codePoint, controlDown, mTermSession)) return;
+
+        // Some IMEs commit letters instead of producing KeyEvents.
+        if (controlDown && !altDown) {
+            if ((codePoint == 'c' || codePoint == 'C') && isSelectingText()) {
+                copySelectedTextToClipboard();
+                return;
+            }
+            if (codePoint == 'v' || codePoint == 'V') {
+                stopTextSelectionMode(true);
+                mTermSession.onPasteTextFromClipboard();
+                return;
+            }
+        }
+
+        if (isSelectingText()) stopTextSelectionMode(true);
 
         if (controlDown) {
             if (codePoint >= 'a' && codePoint <= 'z') {
@@ -1042,6 +1098,7 @@ public final class TerminalView extends View {
      */
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_C) mClipboardCopyKeyDown = false;
         if (TERMINAL_VIEW_KEY_LOGGING_ENABLED)
             mClient.logInfo(LOG_TAG, "onKeyUp(keyCode=" + keyCode + ", event=" + event + ")");
 
@@ -1452,10 +1509,6 @@ public final class TerminalView extends View {
         getTextSelectionCursorController().show(event);
     }
 
-    private boolean hideTextSelectionCursors() {
-        return getTextSelectionCursorController().hide();
-    }
-
     private void renderTextSelection() {
         if (mTextSelectionCursorController != null)
             mTextSelectionCursorController.render();
@@ -1475,6 +1528,15 @@ public final class TerminalView extends View {
             return mTextSelectionCursorController.getSelectedText();
         else
             return null;
+    }
+
+    /** Copy is a local operation: it must never send the terminal interrupt byte. */
+    public boolean copySelectedTextToClipboard() {
+        if (!isSelectingText()) return false;
+        String text = getSelectedText();
+        if (text != null) mTermSession.onCopyTextToClipboard(text);
+        stopTextSelectionMode(true);
+        return true;
     }
 
     /** Get the selected text stored before "MORE" button was pressed on the context menu. */
@@ -1497,7 +1559,8 @@ public final class TerminalView extends View {
     }
 
     public void startTextSelectionMode(MotionEvent event) {
-        if (!requestFocus()) {
+        // The local draft editor may own focus; output selection can coexist with it.
+        if (isFocusable() && !requestFocus()) {
             return;
         }
 
@@ -1508,7 +1571,11 @@ public final class TerminalView extends View {
     }
 
     public void stopTextSelectionMode() {
-        if (hideTextSelectionCursors()) {
+        stopTextSelectionMode(false);
+    }
+
+    public void stopTextSelectionMode(boolean force) {
+        if (mTextSelectionCursorController != null && mTextSelectionCursorController.hide(force)) {
             mClient.copyModeChanged(isSelectingText());
             invalidate();
         }

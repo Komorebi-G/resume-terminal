@@ -1,3 +1,5 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 package com.termux.terminal;
 
 import android.util.Base64;
@@ -2611,10 +2613,14 @@ public final class TerminalEmulator {
         }
     }
 
+    /** Keep text, tabs and line breaks; pasted control bytes must not interrupt/exit a job. */
+    public static String sanitizePasteText(String text) {
+        return text.replaceAll("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F-\\x9F]", "");
+    }
+
     /** If DECSET 2004 is set, prefix paste with "\033[200~" and suffix with "\033[201~". */
     public void paste(String text) {
-        // First: Always remove escape key and C1 control characters [0x80,0x9F]:
-        text = text.replaceAll("(\u001B|[\u0080-\u009F])", "");
+        text = sanitizePasteText(text);
         // Second: Replace all newlines (\n) or CRLF (\r\n) with carriage returns (\r).
         text = text.replaceAll("\r?\n", "\r");
 

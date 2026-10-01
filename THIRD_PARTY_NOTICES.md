@@ -1,6 +1,6 @@
 # 第三方组件与许可
 
-moke 依赖或包含以下第三方组件。感谢这些项目的作者与维护者。
+续端沿用 Moke 依赖或包含的以下第三方组件。感谢这些项目的作者与维护者。
 
 ## Vendored（源码内置）
 
@@ -8,7 +8,7 @@ moke 依赖或包含以下第三方组件。感谢这些项目的作者与维护
 - 来源：[termux/termux-app](https://github.com/termux/termux-app) 的 `terminal-emulator`、`terminal-view` 模块
 - 上游来源：[Android Terminal Emulator](https://github.com/jackpal/Android-Terminal-Emulator)（Jack Palevich 等）
 - 许可：**Apache License 2.0**
-- 修改说明（均为加法式、向后兼容；逐项见各模块的 `README.md`）：
+- Moke 上游已有修改说明（逐项见各模块的 `README.md`；本分支追加修改见下文）：
   - `terminal-view`：`TerminalRenderer` 增加可选行距倍数 / 字间距（em）参数，`TerminalView` 增加 `setFontSpacing(...)`；
     `TerminalView` 增加全屏程序内的滑动处理与滚屏回调，新增 `MokeScroll.java`（滑动决策）；文本选择工具条去掉无作用的 "More…" 项。
   - `terminal-emulator`：将 `TerminalSession.java` 改写为传输无关（面向新增的 `TerminalTransport.java`，不再 fork 本地 shell）；
@@ -59,3 +59,12 @@ moke 依赖或包含以下第三方组件。感谢这些项目的作者与维护
 mosh 集成：`libmosh-client.so`（mosh 1.4.0 前端 + [rjyo/mosh-android](https://github.com/rjyo/mosh-android) 预编译静态库）
 作为**独立可执行二进制**（GPLv3），以独立子进程 + PTY/管道 IPC 运行，**不与产品层链接**。
 二进制不入库，由 `scripts/build-mosh-native.sh` 从公开源码复现。分发含该二进制的 APK 须随附对应 GPLv3 源码；商业分发前请法务确认。
+
+## 续端使用的 Linux 配套程序
+
+- [zmx](https://github.com/neurosnap/zmx)，0.8.1，MIT 许可；由安装脚本从官方分发站下载独立二进制，不打包进 APK。校验值见 `app/src/main/assets/companion/install.sh`，安装说明见 `docs/SETUP.md`。APK 内置本项目的安装脚本和入口脚本，zmx 二进制仍由远端单独下载。
+- 本产品基于 [Moke](https://github.com/briqt/moke)，上游提交 `2aee58b3159b91517632eaac981205fd5b692459`，GPL-3.0-or-later；保留源代码的著作权与许可声明。
+
+## 续端对终端组件的追加修改
+
+2026-09-30 至 2026-10-01，本分支修改 `TerminalEmulator` 的粘贴控制字符过滤、`TerminalTransport` 的 exec 超时接口、`TerminalView` 的 IME 和硬件复制粘贴路径及 `TextSelectionCursorController` 的选区处理，并补充回归测试。这些终端组件及其测试继续采用 Apache-2.0，原作者通知保留。Android 产品层和本分支配套安装/入口脚本采用 GPL-3.0-or-later；独立下载的 zmx 仍采用自己的 MIT 许可。

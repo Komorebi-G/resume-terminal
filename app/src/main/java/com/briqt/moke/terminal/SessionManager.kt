@@ -1,3 +1,5 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 package com.briqt.moke.terminal
 
 import android.content.Context
@@ -56,6 +58,8 @@ class TermSession(
     val remoteTmuxId: MutableStateFlow<String?>,
     /** tmux 跨连接恢复身份；ID 随 server 重启变化时用名称重新收敛。 */
     val remoteTmuxName: MutableStateFlow<String?>,
+    /** Name of the remote persistent PTY. Reconnects use this instead of starting a new shell. */
+    val remoteZmxName: MutableStateFlow<String?>,
     val startedAt: Long,
 ) {
     /** 最终展示标题：customTitle 优先；复制标记仅作临时冲突消歧。 */
@@ -67,6 +71,8 @@ class TermSession(
     /** tmux 管理完整状态；明确区分检查中、零会话、未安装与失败。 */
     val tmuxState: MutableStateFlow<TmuxUiState> = MutableStateFlow(TmuxUiState())
     val tmuxMutex = Mutex()
+    val zmxState: MutableStateFlow<ZmxUiState> = MutableStateFlow(ZmxUiState())
+    val zmxMutex = Mutex()
 
     /**
      * 远端协商出的可用 TERM（[Tmux.DISCOVER_CMD] 的产物）；null=还没探测/远端无判定工具。
@@ -149,6 +155,7 @@ class SessionManager(context: Context) {
         initialTitle: String? = null,
         remoteTmuxId: String? = null,
         remoteTmuxName: String? = null,
+        remoteZmxName: String? = null,
         startupCommand: String? = null,
     ): TermSession {
         val baseTitle = baseTitleOf(host)
@@ -163,13 +170,17 @@ class SessionManager(context: Context) {
         val displayTitle = MutableStateFlow(initialDisplay)
         val alive = MutableStateFlow(true)
         val latency = MutableStateFlow<Int?>(null)
+        val zmxName = MutableStateFlow(remoteZmxName)
         val controller = TerminalController(
             context = appContext,
             onFinished = { alive.value = false; latency.value = null },
             // 空标题（远端程序退出时常发的空 OSC）当作「清除」处理，回落基座；
             // 早期实现直接忽略，结果标题一直挂着上一个程序的名字。
-            onTitle = { t -> title.value = if (t.isNullOrBlank()) titleBase else t },
+            onTitle = { t -> title.value = if (t.isNullOrBlank()) {
+                if (remoteZmxName != null && zmxName.value == null) baseTitle else titleBase
+            } else t },
         )
+        controller.onZmxFallback = { zmxName.value = null }
         // 传输选择：偏好 mosh 的主机走 MoshTransport（SSH 引导 + native mosh-client 子进程 PTY），
         // 否则走 SshTransport（并周期探测 RTT 供状态条显示）。
         val transport = if (host.useMosh) {
@@ -201,6 +212,7 @@ class SessionManager(context: Context) {
             copyMark = mark,
             remoteTmuxId = MutableStateFlow(remoteTmuxId),
             remoteTmuxName = MutableStateFlow(remoteTmuxName),
+            remoteZmxName = zmxName,
             startedAt = System.currentTimeMillis(),
         )
         // 结束文案按本会话的真实处境说：确认附加在 tmux 上、又是正常退出（detach 就是 code 0），
@@ -212,7 +224,9 @@ class SessionManager(context: Context) {
             }
 
             override fun sessionEnded(exitCode: Int): String =
-                if (exitCode == 0 && ts.tmuxAttached.value == true) {
+                if (exitCode == 0 && ts.remoteZmxName.value != null) {
+                    appContext.localized(R.string.term_left_zmx)
+                } else if (exitCode == 0 && ts.tmuxAttached.value == true) {
                     appContext.localized(R.string.term_left_tmux)
                 } else {
                     TerminalSession.statusText.sessionEnded(exitCode)
@@ -273,6 +287,20 @@ class SessionManager(context: Context) {
                 term ?: source.negotiatedTerm.value,
             ),
         ).also { it.negotiatedTerm.value = term ?: source.negotiatedTerm.value }
+    }
+
+    /** A new SSH channel attaches to the named server PTY; opening another tab never types into it. */
+    fun openZmx(source: TermSession, name: String, jumpHost: Host? = null): TermSession {
+        _sessions.value.firstOrNull {
+            it.host.id == source.host.id && it.remoteZmxName.value == name && it.alive.value
+        }?.let { return it }
+        return open(
+            host = source.host,
+            jumpHost = jumpHost,
+            initialTitle = name,
+            remoteZmxName = name,
+            startupCommand = Zmx.attachCommand(name),
+        )
     }
 
     /** 根据实时标题冲突派生复制标记；用户自定义标题具有绝对优先级。 */

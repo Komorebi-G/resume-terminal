@@ -1,3 +1,5 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 package com.briqt.moke.terminal
 
 import android.content.Context
@@ -125,7 +127,8 @@ class MoshTransport(
 
                 // 连接成功后自动执行命令：mosh 握手需片刻，延迟发送再触发回车。
                 // 与 SSH 侧一致：tmux 覆盖时不注入，主机自配启动命令时仍注入。
-                if (startupCommand == null && host.loginCommand.isNotBlank()) {
+                if (startupCommand == null && host.persistence == com.briqt.moke.data.SessionPersistence.NONE &&
+                    host.loginCommand.isNotBlank()) {
                     Thread({
                         runCatching {
                             Thread.sleep(1500)
@@ -201,13 +204,15 @@ class MoshTransport(
     /**
      * mosh 数据面虽是 UDP，管理 tmux 仍需一条 SSH 控制连接。失败返回 null，由 UI 明确显示并允许重试。
      */
-    override fun exec(command: String): String? {
+    override fun exec(command: String): String? = exec(command, 10_000)
+
+    override fun exec(command: String, timeoutMillis: Long): String? {
         if (closed) return null
         return runCatching {
             withControlClient { client ->
                 client.startSession().use { s ->
                     val cmd = s.exec(command)
-                    cmd.join(10, TimeUnit.SECONDS)
+                    cmd.join(timeoutMillis.coerceIn(1_000, 120_000), TimeUnit.MILLISECONDS)
                     if (cmd.isOpen) {
                         runCatching { cmd.close() }
                         return@withControlClient null

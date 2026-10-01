@@ -1,3 +1,5 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 package com.briqt.moke.ui
 
 import androidx.compose.foundation.layout.Arrangement
@@ -65,7 +67,7 @@ fun HostEditScreen(
     savedFingerprint: String? = null,
     onClearFingerprint: (String, Int) -> Unit = { _, _ -> },
 ) {
-    val base = initial ?: Host()
+    val base = initial ?: Host(persistence = SessionPersistence.ZMX)
     var label by remember { mutableStateOf(base.label) }
     var host by remember { mutableStateOf(base.host) }
     var port by remember { mutableStateOf(base.port.toString()) }
@@ -274,10 +276,15 @@ fun HostEditScreen(
                         title = stringResource(R.string.persistence_none),
                     ),
                     DropdownOption(
+                        id = SessionPersistence.ZMX.name,
+                        title = stringResource(R.string.persistence_zmx),
+                    ),
+                ) + if (base.persistence == SessionPersistence.TMUX) listOf(
+                    DropdownOption(
                         id = SessionPersistence.TMUX.name,
                         title = stringResource(R.string.persistence_tmux),
                     ),
-                ),
+                ) else emptyList(),
                 selectedId = persistence.name,
                 onSelect = { persistence = SessionPersistence.valueOf(it) },
             )
@@ -299,11 +306,18 @@ fun HostEditScreen(
                     )
                 }
             }
+            if (persistence == SessionPersistence.ZMX) {
+                Text(
+                    stringResource(R.string.host_zmx_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
 
             // 启动命令：协议级 exec（SSH command channel / mosh-server --），空=远端默认 login shell。
             // 与「登录后自动执行」是两回事：那条是 shell 起来之后往 PTY 里敲的一行。
             // 会话持久化=tmux 时这个位置归 tmux 附加命令，字段置灰并说明原因。
-            val startupEnabled = persistence != SessionPersistence.TMUX
+            val startupEnabled = persistence == SessionPersistence.NONE
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 OutlinedTextField(
                     value = startupCommand, onValueChange = { startupCommand = it },
@@ -316,7 +330,7 @@ fun HostEditScreen(
                 Text(
                     stringResource(
                         if (startupEnabled) R.string.startup_command_help
-                        else R.string.startup_command_tmux_note
+                        else R.string.startup_command_persistence_note
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -326,6 +340,7 @@ fun HostEditScreen(
             // 登录后自动执行：支持多行（每行一条命令，按序执行）；传输层按 "命令+\n" 原样下发。
             OutlinedTextField(
                 value = loginCommand, onValueChange = { loginCommand = it },
+                enabled = persistence == SessionPersistence.NONE,
                 label = { Text(stringResource(R.string.field_login_command)) },
                 placeholder = { Text(stringResource(R.string.login_command_hint)) },
                 minLines = 1, maxLines = 6,
@@ -412,6 +427,11 @@ fun HostEditScreen(
                                 // 关掉持久化时一并忘记记住的会话名，避免下次重新开启后悄悄附加到旧会话。
                                 tmuxSessionName = if (persistence == SessionPersistence.TMUX) {
                                     base.tmuxSessionName
+                                } else {
+                                    ""
+                                },
+                                zmxSessionName = if (persistence == SessionPersistence.ZMX) {
+                                    base.zmxSessionName
                                 } else {
                                     ""
                                 },

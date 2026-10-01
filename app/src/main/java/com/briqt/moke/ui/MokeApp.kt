@@ -1,3 +1,5 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 package com.briqt.moke.ui
 
 import androidx.activity.compose.BackHandler
@@ -94,6 +96,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
     val hostKeyRequest by vm.hostKeyRequest.collectAsState()
     val tmuxScrollSetup by vm.tmuxScrollSetup.collectAsState()
     val tmuxPickerFor by vm.tmuxPicker.collectAsState()
+    val zmxPickerFor by vm.zmxPicker.collectAsState()
     val scrollMode by vm.scrollMode.collectAsState()
     val includePrerelease by vm.includePrerelease.collectAsState()
     val updateInfo by vm.updateInfo.collectAsState()
@@ -207,6 +210,7 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         TerminalAlerts.cancel(appContext, s.sessionId)
                         onDispose { if (TerminalAlerts.visibleSessionId == s.sessionId) TerminalAlerts.visibleSessionId = null }
                     }
+                    val quickShortcut by vm.quickShortcut.collectAsState()
                     TerminalScreen(
                         ts = ts,
                         primaryFontId = primaryFontId,
@@ -255,8 +259,24 @@ fun MokeApp(vm: MokeViewModel = viewModel()) {
                         onTmuxTakeOver = { target ->
                             screen = Screen.Terminal(vm.openTmuxSession(ts, target, detachOthers = true))
                         },
+                        onZmxRefresh = { vm.refreshZmx(ts) },
+                        onZmxOpen = { name -> screen = Screen.Terminal(vm.openZmxSession(ts, name)) },
+                        onZmxKill = { name -> vm.killZmx(ts, name) },
+                        onZmxInstall = { vm.installZmx(ts) },
                         onOpenFiles = { openFiles(ts.host, ts.id) },
+                        quickShortcut = quickShortcut,
+                        onQuickShortcut = vm::setQuickShortcut,
                     )
+                    if (zmxPickerFor == ts.id) {
+                        val zmxState by ts.zmxState.collectAsState()
+                        ZmxPickerDialog(
+                            sessions = zmxState.sessions,
+                            onPick = { name ->
+                                vm.pickZmxSession(ts.id, name)?.let { screen = Screen.Terminal(it) }
+                            },
+                            onPlainShell = { vm.dismissZmxPicker() },
+                        )
+                    }
                     // 连接即选会话：主机「会话持久化=tmux」且还没记住选择时，连上后弹一次。
                     if (tmuxPickerFor == ts.id) {
                         val tmuxState by ts.tmuxState.collectAsState()

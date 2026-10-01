@@ -1,3 +1,5 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 package com.briqt.moke.terminal
 
 import org.junit.Assert.assertEquals
@@ -8,13 +10,11 @@ import org.junit.Test
 class ModifiersTest {
 
     @Test
-    fun `三态循环 关到一次性到锁定再回关`() {
+    fun `点按启用和取消 不意外锁定`() {
         var m = Modifiers()
         assertEquals(ModState.Off, m.ctrl)
         m = m.toggle(ModKind.Ctrl)
         assertEquals(ModState.Once, m.ctrl)
-        m = m.toggle(ModKind.Ctrl)
-        assertEquals(ModState.Locked, m.ctrl)
         m = m.toggle(ModKind.Ctrl)
         assertEquals(ModState.Off, m.ctrl)
     }
@@ -29,16 +29,17 @@ class ModifiersTest {
     /** 锁定态正是"按住不放"：连发 Ctrl+C、连走光标都靠它。 */
     @Test
     fun `锁定态不被消费`() {
-        val m = Modifiers().toggle(ModKind.Ctrl).toggle(ModKind.Ctrl)
+        val m = Modifiers().lock(ModKind.Ctrl)
         assertEquals(ModState.Locked, m.ctrl)
         assertEquals(ModState.Locked, m.consumeOnce().consumeOnce().ctrl)
+        assertEquals(ModState.Off, m.toggle(ModKind.Ctrl).ctrl)
     }
 
     @Test
     fun `多个修饰互不干扰 且只熄灭一次性的那些`() {
         val m = Modifiers()
             .toggle(ModKind.Ctrl)                      // Once
-            .toggle(ModKind.Alt).toggle(ModKind.Alt)   // Locked
+            .lock(ModKind.Alt)                        // Locked
             .toggle(ModKind.Shift)                     // Once
         val after = m.consumeOnce()
         assertEquals(ModState.Off, after.ctrl)

@@ -1,3 +1,5 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 package com.briqt.moke.ui
 
 import android.app.Application
@@ -18,6 +20,11 @@ import com.briqt.moke.terminal.Tmux
 import com.briqt.moke.terminal.TmuxDiscovery
 import com.briqt.moke.terminal.TmuxPhase
 import com.briqt.moke.terminal.TmuxSession
+import com.briqt.moke.terminal.Zmx
+import com.briqt.moke.terminal.ZmxInstaller
+import com.briqt.moke.terminal.QuickShortcut
+import com.briqt.moke.terminal.ZmxDiscovery
+import com.briqt.moke.terminal.ZmxPhase
 import com.briqt.moke.data.FilesSort
 import com.briqt.moke.data.GroupBy
 import com.briqt.moke.data.KeyboardMode
@@ -133,6 +140,13 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     val cursorBlink: StateFlow<Boolean> = settings.cursorBlink
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
+    val quickShortcut = settings.quickShortcut
+        .stateIn(viewModelScope, SharingStarted.Eagerly, QuickShortcut.SHIFT_LEFT)
+
+    fun setQuickShortcut(shortcut: QuickShortcut) = viewModelScope.launch {
+        settings.setQuickShortcut(shortcut)
+    }
+
     val extraKeysVisible: StateFlow<Boolean> = settings.extraKeysVisible
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
@@ -142,7 +156,7 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     val dynamicColor: StateFlow<Boolean> = settings.dynamicColor
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val keyboardMode: StateFlow<KeyboardMode> = settings.keyboardMode
-        .stateIn(viewModelScope, SharingStarted.Eagerly, KeyboardMode.SECURE)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, KeyboardMode.IME)
     val scrollMode: StateFlow<ScrollMode> = settings.scrollMode
         .stateIn(viewModelScope, SharingStarted.Eagerly, ScrollMode.SMART)
     val tmuxScrollSetup: StateFlow<Boolean> = settings.tmuxScrollSetup
@@ -171,7 +185,6 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setIncludePrerelease(enabled: Boolean) = viewModelScope.launch {
         settings.setIncludePrerelease(enabled)
-        checkUpdateSilently()   // 节流已被清零，这里立刻按新口径重查一次
     }
 
     /**
@@ -449,6 +462,115 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     private fun tmuxNameOf(ts: TermSession, id: String): String? =
         ts.tmuxState.value.sessions.firstOrNull { it.id == id }?.name
 
+    // zmx is a PTY keeper, not a terminal multiplexer. Its sessions are the same
+    // processes and screen contents seen from the desktop and from this app.
+    fun refreshZmx(ts: TermSession) = viewModelScope.launch(Dispatchers.IO) {
+        ts.zmxMutex.withLock { refreshZmxLocked(ts, retryUntilReady = true) }
+    }
+
+    private suspend fun refreshZmxLocked(ts: TermSession, retryUntilReady: Boolean) {
+        val previous = ts.zmxState.value.copy(notice = null)
+        ts.zmxState.value = previous.copy(
+            phase = if (previous.phase == ZmxPhase.READY) ZmxPhase.READY else ZmxPhase.CHECKING,
+            busy = true,
+            message = null,
+        )
+        val deadline = System.currentTimeMillis() + if (retryUntilReady) 20_000L else 0L
+        var out: String?
+        var backoff = 1_000L
+        while (true) {
+            out = runCatching { ts.transport.exec(Zmx.DISCOVER_CMD) }.getOrNull()
+            if (out != null || !retryUntilReady || !currentCoroutineContext().isActive) break
+            if (System.currentTimeMillis() + backoff >= deadline) break
+            delay(backoff)
+            backoff = (backoff * 2).coerceAtMost(8_000L)
+        }
+        ts.zmxState.value = when {
+            out == null -> previous.copy(phase = ZmxPhase.ERROR, busy = false,
+                message = str(R.string.zmx_control_unavailable))
+            else -> when (val result = Zmx.parseDiscovery(out)) {
+                ZmxDiscovery.NotInstalled -> previous.copy(phase = ZmxPhase.NOT_INSTALLED,
+                    sessions = emptyList(), busy = false)
+                is ZmxDiscovery.Ready -> previous.copy(phase = ZmxPhase.READY,
+                    sessions = result.sessions, busy = false)
+                ZmxDiscovery.Malformed -> previous.copy(phase = ZmxPhase.ERROR, busy = false,
+                    message = str(R.string.zmx_invalid_response))
+                is ZmxDiscovery.Failed -> previous.copy(phase = ZmxPhase.ERROR, busy = false,
+                    message = str(R.string.zmx_runtime_error) + "\n" + result.output.take(500))
+            }
+        }
+    }
+
+    /** Explicit setup runs in a separate SSH channel and never writes into the live shell. */
+    fun installZmx(ts: TermSession) = viewModelScope.launch(Dispatchers.IO) {
+        if (!ts.alive.value || !ts.zmxMutex.tryLock()) return@launch
+        try {
+            val previous = ts.zmxState.value
+            if (previous.phase !in setOf(ZmxPhase.NOT_INSTALLED, ZmxPhase.ERROR)) return@launch
+            ts.zmxState.value = previous.copy(phase = ZmxPhase.INSTALLING,
+                busy = true, message = null, notice = null)
+            val result = runCatching {
+                val assets = getApplication<Application>().assets
+                val installer = assets.open("companion/install.sh").bufferedReader().use { it.readText() }
+                val wrapper = assets.open("companion/remote-work").bufferedReader().use { it.readText() }
+                ts.transport.exec(ZmxInstaller.command(installer, wrapper), ZmxInstaller.TIMEOUT_MILLIS)
+                    ?.let(Zmx::parseAction)
+            }.getOrNull()
+            if (result?.ok == true) {
+                refreshZmxLocked(ts, retryUntilReady = false)
+                if (ts.zmxState.value.phase == ZmxPhase.READY) {
+                    ts.zmxState.value = ts.zmxState.value.copy(notice = str(R.string.zmx_install_success))
+                }
+            } else {
+                val reason = when (result?.output?.let(ZmxInstaller::errorCode)) {
+                    "system" -> R.string.zmx_install_system
+                    "architecture" -> R.string.zmx_install_architecture
+                    "dependency" -> R.string.zmx_install_dependency
+                    "write" -> R.string.zmx_install_write
+                    "conflict" -> R.string.zmx_install_conflict
+                    "download" -> R.string.zmx_install_download
+                    "checksum" -> R.string.zmx_install_checksum
+                    "runtime" -> R.string.zmx_runtime_error
+                    else -> R.string.zmx_install_failed
+                }
+                val details = result?.output?.let(ZmxInstaller::details).orEmpty()
+                ts.zmxState.value = previous.copy(busy = false, notice = null,
+                    message = str(reason) + details.takeIf { it.isNotBlank() }?.let { "\n$it" }.orEmpty())
+            }
+        } finally {
+            ts.zmxMutex.unlock()
+        }
+    }
+
+    fun killZmx(ts: TermSession, name: String) = viewModelScope.launch(Dispatchers.IO) {
+        ts.zmxMutex.withLock {
+            val previous = ts.zmxState.value
+            ts.zmxState.value = previous.copy(busy = true, message = null)
+            val out = runCatching { ts.transport.exec(Zmx.killCommand(name)) }.getOrNull()
+            val result = out?.let(Zmx::parseAction)
+            if (result?.ok == true) {
+                store.update(ts.host.id) { host ->
+                    if (host.zmxSessionName == name) host.copy(zmxSessionName = "") else host
+                }
+                refreshZmxLocked(ts, retryUntilReady = false)
+            } else {
+                ts.zmxState.value = previous.copy(busy = false,
+                    message = result?.output?.take(500) ?: str(R.string.zmx_control_unavailable))
+            }
+        }
+    }
+
+    fun openZmxSession(source: TermSession, name: String): String {
+        val session = sessions.openZmx(source, name, resolveJump(source.host))
+        ensureSessionService()
+        rememberZmxSession(source.host, name)
+        return session.id
+    }
+
+    private fun rememberZmxSession(host: Host, name: String) = viewModelScope.launch {
+        store.update(host.id) { if (it.zmxSessionName == name) it else it.copy(zmxSessionName = name) }
+    }
+
     /**
      * 打开远端 tmux 会话：创建（或复用）专门的 Moke 终端连接，按名称原子恢复。
      * 不向当前前台终端注入文本，因此当前正在运行的 shell/TUI/半输入命令均不会被破坏。
@@ -520,13 +642,19 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
             initialTitle = source.displayTitle.value,
             remoteTmuxId = source.remoteTmuxId.value,
             remoteTmuxName = source.remoteTmuxName.value,
-            startupCommand = source.startupCommand,
+            remoteZmxName = source.remoteZmxName.value,
+            startupCommand = if (source.host.persistence == SessionPersistence.ZMX) {
+                source.remoteZmxName.value?.let { Zmx.attachCommand(it, existingOnly = true) }
+            } else source.startupCommand,
         )
         ensureSessionService()
         // 重连同样要核对是否真的附上了。漏掉这一步，新会话的 tmuxAttached 恒为 null：
         // detach 后提示会退化成「会话已结束」，而 tmux 真的没附上时顶栏还继续标着 tmux ——
         // 正是首次附加时特意用侧通道消灭掉的那种「UI 撒谎」。
         source.remoteTmuxName.value?.let { confirmTmuxAttach(session, it) }
+        if (source.host.persistence == SessionPersistence.ZMX) {
+            requestZmxPickerWhenReady(session, source.remoteZmxName.value)
+        }
         return session.id
     }
 
@@ -552,6 +680,23 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun openSession(host: Host): String {
         touchHost(host)
+        if (host.persistence == SessionPersistence.ZMX) {
+            sessions.sessions.value.firstOrNull {
+                it.host.id == host.id && it.remoteZmxName.value == host.zmxSessionName &&
+                    it.remoteZmxName.value != null && it.alive.value
+            }?.let { return it.id }
+            val remembered = host.zmxSessionName.takeIf { it.isNotBlank() }
+            val ts = sessions.open(
+                host = host,
+                jumpHost = resolveJump(host),
+                initialTitle = remembered,
+                remoteZmxName = remembered,
+                startupCommand = remembered?.let { Zmx.attachCommand(it, existingOnly = true) },
+            )
+            ensureSessionService()
+            requestZmxPickerWhenReady(ts, remembered)
+            return ts.id
+        }
         val remembered = host.tmuxSessionName
             .takeIf { host.persistence == SessionPersistence.TMUX && it.isNotBlank() }
         val ts = sessions.open(
@@ -567,6 +712,33 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
             requestTmuxPickerWhenReady(ts)
         }
         return ts.id
+    }
+
+    private fun requestZmxPickerWhenReady(ts: TermSession, remembered: String?) = viewModelScope.launch {
+        refreshZmx(ts).join()
+        if (ts.zmxState.value.phase == ZmxPhase.NOT_INSTALLED) {
+            ts.remoteZmxName.value = null
+            if (remembered != null) rememberZmxSession(ts.host, "")
+        }
+        if (ts.alive.value && ts.zmxState.value.phase == ZmxPhase.READY &&
+            (remembered == null || ts.zmxState.value.sessions.none { it.name == remembered })) {
+            ts.remoteZmxName.value = null
+            if (remembered != null) rememberZmxSession(ts.host, "")
+            _zmxPicker.value = ts.id
+        }
+    }
+
+    private val _zmxPicker = MutableStateFlow<String?>(null)
+    val zmxPicker: StateFlow<String?> = _zmxPicker.asStateFlow()
+
+    fun dismissZmxPicker() { _zmxPicker.value = null }
+
+    fun pickZmxSession(sourceId: String, name: String): String? {
+        val source = sessions.get(sourceId) ?: return null
+        _zmxPicker.value = null
+        val newId = openZmxSession(source, name)
+        if (newId != sourceId) sessions.close(sourceId)
+        return newId
     }
 
     /** 连接就绪后探测一次；确实装了 tmux 才弹选择器（未安装/失败都不打扰）。 */
@@ -601,6 +773,10 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     fun duplicateSession(id: String): String? {
         val src = sessions.get(id) ?: return null
         touchHost(src.host)
+        if (src.host.persistence == SessionPersistence.ZMX) {
+            // A new terminal starts with the persistent session picker, never an unprotected shell.
+            return openSession(src.host.copy(zmxSessionName = ""))
+        }
         val newId = sessions.open(src.host, resolveJump(src.host), carryFrom = src).id
         ensureSessionService()
         return newId
@@ -839,7 +1015,6 @@ class MokeViewModel(app: Application) : AndroidViewModel(app) {
     // 放在类末尾：init 里要用到上面声明的 settings / appVersion，Kotlin 按声明顺序初始化，提前放会 NPE。
     init {
         repairLegacyTmuxLoginCommands()
-        checkUpdateSilently()
     }
 
     private companion object {

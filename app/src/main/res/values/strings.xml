@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Modified for Resume Terminal (personal Moke fork), 2026-10-01. Original copyright and licenses retained; see COPYRIGHT.md. -->
 <!-- 默认语言 = English（兜底）；中文见 values-zh/strings.xml。 -->
 <resources>
-    <string name="app_name">Moke</string>
-    <string name="app_title">Moke · 墨客</string>
+    <string name="ssh_auth_failed">SSH login failed for %1$s. Check the account name on the remote host and your password or private key. WSL uses your Linux account name.</string>
+    <string name="app_name">Resume Terminal</string>
+    <string name="app_title">Resume Terminal</string>
 
     <!-- 通用动作 -->
     <string name="action_back">Back</string>
@@ -30,6 +32,41 @@
     <string name="group_expand">Expand group</string>
     <string name="tmux_title">tmux sessions</string>
     <string name="tmux_open">tmux sessions</string>
+    <string name="zmx_title">Persistent terminals</string>
+    <string name="zmx_temporary_title">Temporary shell</string>
+    <string name="zmx_open">Persistent terminals</string>
+    <string name="zmx_new">New terminal</string>
+    <string name="zmx_empty">No persistent terminals yet</string>
+    <string name="zmx_name_hint">Terminal name</string>
+    <string name="zmx_checking">Loading terminals…</string>
+    <string name="zmx_not_installed">The companion is unavailable. You can keep using this temporary shell, or install it to create persistent terminals.</string>
+    <string name="zmx_install_scope">For Linux x86_64 / ARM64. Downloads verified zmx 0.8.1 from zmx.sh into this SSH user’s directory, plus ~/.local/bin/remote-work. No sudo required. The current shell stays temporary.</string>
+    <string name="zmx_install">Install and enable</string>
+    <string name="zmx_installing">Installing the companion… You can keep using the shell.</string>
+    <string name="zmx_install_success">Companion ready. Create a new persistent terminal below; your current temporary shell and its programs are unchanged. On the computer, use ~/.local/bin/remote-work project.</string>
+    <string name="zmx_install_system">Automatic setup supports Linux. Continue with a temporary shell on this host.</string>
+    <string name="zmx_install_architecture">Automatic setup supports x86_64 and ARM64. Other architectures need a manual zmx installation.</string>
+    <string name="zmx_install_dependency">A required command is missing. Install the command named below on the host, then retry.</string>
+    <string name="zmx_install_write">The SSH user cannot write to the installation directory. Check permissions, free space and mount options, then retry.</string>
+    <string name="zmx_install_conflict">An unrelated remote-work command already exists. Rename it or install the companion manually.</string>
+    <string name="zmx_install_download">Download failed. Check the host internet connection, DNS, proxy and CA certificates, then retry.</string>
+    <string name="zmx_install_checksum">The download failed verification and was not installed. Retry or use a verified manual installation.</string>
+    <string name="zmx_runtime_error">zmx cannot run correctly. Check binary compatibility, noexec mounts and terminal directory permissions.</string>
+    <string name="zmx_install_failed">Setup did not finish or the SSH response was lost. Refresh to check whether it completed, then retry if needed. Your temporary shell is still available.</string>
+    <string name="zmx_keep_plain_shell">Continue using temporary shell</string>
+    <string name="zmx_plain_hint">Using a temporary shell; reconnecting may lose your work.</string>
+    <string name="zmx_setup">Set up persistence</string>
+    <string name="zmx_control_unavailable">Could not load the remote terminals. Check the connection and retry.</string>
+    <string name="zmx_invalid_response">The remote zmx response could not be understood.</string>
+    <string name="zmx_kill_confirm">Stop “%1$s” and its running programs? This cannot be undone.</string>
+    <string name="zmx_current">Current</string>
+    <string name="zmx_open_session">Open</string>
+    <string name="zmx_stop">Stop</string>
+    <string name="zmx_picker_prompt">Continue a terminal from your phone or computer, or create a new one.</string>
+    <string name="zmx_plain_shell">Open a temporary shell</string>
+    <string name="zmx_disconnected">Disconnected. Reopen a running terminal from the persistent terminal list.</string>
+    <string name="close_zmx_connection_confirm">Disconnect from “%1$s”? You can reopen a running persistent terminal from the list.</string>
+    <string name="zmx_client_count">%1$d connected</string>
     <string name="tmux_new">New session</string>
     <string name="tmux_attach">Open</string>
     <string name="tmux_resume">Resume</string>
@@ -168,12 +205,21 @@
     <!-- 附加键 / 文本段 -->
     <string name="key_text">Text</string>
     <string name="key_more">More keys</string>
+    <string name="key_paste">Paste (Ctrl+V)</string>
+    <string name="key_interrupt">Interrupt task (Ctrl+C)</string>
+    <string name="key_interrupt_label">STOP</string>
+    <string name="clipboard_empty">Clipboard has no text to paste</string>
     <string name="keys_panel_collapse">Collapse</string>
+    <string name="keys_show_all">All keys</string>
+    <string name="keys_show_less">Fewer keys</string>
+    <string name="modifier_off">Off; tap for the next key, hold to lock</string>
+    <string name="modifier_once">Next key only; tap to cancel</string>
+    <string name="modifier_locked">Locked; tap to cancel</string>
+    <string name="modifier_lock_feedback">%1$s locked · tap to cancel</string>
     <string name="keys_section_edit">Editing</string>
     <string name="keys_section_fn">Function</string>
     <string name="keys_section_ctrl">Control</string>
-    <string name="composer_title">Text block</string>
-    <string name="composer_field">Text to send</string>
+    <string name="composer_field">Command / prompt</string>
     <string name="composer_clear">Clear</string>
     <string name="composer_send">Send</string>
     <string name="composer_send_enter">Send + Enter</string>
@@ -216,14 +262,14 @@
 
     <!-- 关于 -->
     <string name="about_title">About</string>
-    <string name="app_tagline">Native SSH / mosh terminal for Android</string>
+    <string name="app_tagline">Your WSL terminals, ready on your phone</string>
     <string name="label_version">Version</string>
     <string name="check_update">Check for updates</string>
     <string name="up_to_date">Up to date</string>
     <string name="new_version">Update to %1$s</string>
     <string name="retry_with_msg">Retry (%1$s)</string>
     <string name="licenses_header">Open source &amp; licenses</string>
-    <string name="licenses_body">Moke is built on several open-source projects; see the project THIRD_PARTY_NOTICES for the full license list.</string>
+    <string name="licenses_body">Based on Moke (GPL-3.0-or-later), Termux terminal components (Apache-2.0), and zmx (MIT). See THIRD_PARTY_NOTICES for details.</string>
 
     <!-- ViewModel / 数据 -->
     <string name="license_local">Local</string>
@@ -366,6 +412,9 @@
     <string name="host_persistence">Session persistence</string>
     <string name="persistence_none">None</string>
     <string name="persistence_tmux">tmux (attach on connect)</string>
+    <string name="persistence_zmx">Persistent terminals (zmx)</string>
+    <string name="host_zmx_hint">Keep programs and the screen on the Linux host after disconnecting. Requires zmx; you can install it from the terminal panel after SSH connects.</string>
+    <string name="startup_command_persistence_note">Session persistence uses this startup slot.</string>
     <string name="host_persistence_hint">With tmux: connecting to this host enters a tmux session — straight in if a session name is remembered, otherwise you pick one first.</string>
     <string name="scroll_none_mosh">mosh does not carry a scrollback buffer, so there is no history to scroll here. Run tmux on the remote (or use SSH) to scroll.</string>
     <string name="scroll_none_alt">A full-screen program owns the screen; there is no history to scroll.</string>
@@ -378,7 +427,9 @@
     <string name="scroll_mode_hint">Smart (recommended): sends wheel events when the remote enables mouse scrolling; scrolls local history for ordinary output; sends nothing when it cannot tell, so arrow keys never walk your command history.\nAlways send wheel: worth trying when the remote supports the mouse but has not enabled tracking on the current screen.\nAlways send arrow keys: use it when pagers (less, man, vim) will not scroll — especially over mosh, which carries no information about the foreground program, so only you can decide.</string>
     <string name="include_prerelease">Include pre-releases</string>
     <string name="include_prerelease_sub">Count rc pre-releases when checking for updates. They carry new features early and may be unstable.</string>
-    <string name="github_repo">GitHub repository</string>
+    <string name="github_repo">Moke upstream source</string>
+    <string name="fork_github_repo">Resume Terminal source and feedback</string>
+    <string name="about_fork_description">A personal fork based on briqt’s Moke, tailored to Linux / WSL development habits. The original client and core features come from Moke. This is a derivative project, independently maintained, with the upstream copyright and GPL-3.0-or-later license preserved.</string>
 
     <!-- 0.1.20: credential store / connect feedback / font notes -->
     <string name="hosts_unreadable_title">Saved connections cannot be decrypted</string>
@@ -406,6 +457,7 @@
     <string name="term_connect_failed">[connect failed: %1$s]</string>
     <string name="term_session_ended">[session ended]</string>
     <string name="term_left_tmux">[left tmux]</string>
+    <string name="term_left_zmx">[left persistent terminal]</string>
     <string name="term_session_ended_code">[session ended (code %1$d)]</string>
     <string name="term_session_ended_signal">[session ended (signal %1$d)]</string>
     <string name="font_no_url">This font has no download URL</string>
@@ -456,4 +508,18 @@ Its saved password / private key and host fingerprint are removed too. This can\
     <string name="alert_channel_desc">When a remote program rings the bell or sends a notification</string>
     <string name="menu_terminal_alerts">Bell &amp; notification alerts</string>
     <string name="menu_terminal_alerts_sub">When a remote program rings the bell or sends a notification sequence (OSC 9 / 777) while you\'re not in that session, show a system notification</string>
+    <string name="composer_prompt">Multiline prompt / text</string>
+    <string name="composer_command_mode">Switch to single line</string>
+    <string name="composer_multiline_mode">Expand multiline input</string>
+    <string name="composer_multiline_hint">Enter adds a line · arrow submits</string>
+
+    <string name="quick_shortcut_configure">Quick key: %1$s · Change</string>
+    <string name="quick_shortcut_title">Choose quick key</string>
+    <string name="quick_shortcut_hint">The selection is saved for all connections. Ctrl, Alt and Shift remain available for other combinations.</string>
+    <string name="quick_shortcut_close">Close</string>
+    <string name="codex_model_command">Model / effort · /model</string>
+    <string name="codex_resume_command">Resume chat · /resume</string>
+    <string name="command_restore_draft">Draft saved · Restore</string>
+    <string name="command_draft_busy">A draft is already saved. Send or clear this input before switching commands.</string>
+    <string name="quick_shortcut_scroll_hint">Scroll for more choices</string>
 </resources>

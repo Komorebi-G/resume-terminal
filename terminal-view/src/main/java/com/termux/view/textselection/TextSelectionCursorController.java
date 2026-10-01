@@ -1,3 +1,5 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 package com.termux.view.textselection;
 
 import android.content.ClipboardManager;
@@ -55,12 +57,17 @@ public class TextSelectionCursorController implements CursorController {
 
     @Override
     public boolean hide() {
+        return hide(false);
+    }
+
+    /** Explicit copy/paste/cancel actions must work immediately after a long press. */
+    public boolean hide(boolean force) {
         if (!isActive()) return false;
 
         // prevent hide calls right after a show call, like long pressing the down key
         // 300ms seems long enough that it wouldn't cause hide problems if action button
         // is quickly clicked after the show, otherwise decrease it
-        if (System.currentTimeMillis() - mShowStartTime < 300) {
+        if (!force && System.currentTimeMillis() - mShowStartTime < 300) {
             return false;
         }
 
@@ -135,12 +142,10 @@ public class TextSelectionCursorController implements CursorController {
 
                 switch (item.getItemId()) {
                     case ACTION_COPY:
-                        String selectedText = getSelectedText();
-                        terminalView.mTermSession.onCopyTextToClipboard(selectedText);
-                        terminalView.stopTextSelectionMode();
+                        terminalView.copySelectedTextToClipboard();
                         break;
                     case ACTION_PASTE:
-                        terminalView.stopTextSelectionMode();
+                        terminalView.stopTextSelectionMode(true);
                         terminalView.mTermSession.onPasteTextFromClipboard();
                         break;
                     case ACTION_MORE:
@@ -346,9 +351,8 @@ public class TextSelectionCursorController implements CursorController {
     }
 
     public void onTouchModeChanged(boolean isInTouchMode) {
-        if (!isInTouchMode) {
-            terminalView.stopTextSelectionMode();
-        }
+        // A hardware keyboard can leave touch mode before Ctrl+C is delivered.
+        // Keep the selection until copy, cancellation or an ordinary key dismisses it.
     }
 
     @Override

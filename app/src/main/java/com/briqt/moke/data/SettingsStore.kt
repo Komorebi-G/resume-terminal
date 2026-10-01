@@ -1,4 +1,8 @@
+/* Modified for Resume Terminal (personal Moke fork), 2026-10-01.
+ * Original copyright and licenses retained; see COPYRIGHT.md. */
 package com.briqt.moke.data
+
+import com.briqt.moke.terminal.QuickShortcut
 
 import android.content.Context
 import androidx.datastore.core.DataStore
@@ -43,6 +47,7 @@ class SettingsStore(private val context: Context) {
     private val lineSpacingKey = floatPreferencesKey("line_spacing_mul")
     private val letterSpacingKey = floatPreferencesKey("letter_spacing_mul")
     private val userFontsKey = stringPreferencesKey("user_fonts")
+    private val quickShortcutKey = stringPreferencesKey("quick_shortcut")
     private val extraKeysVisibleKey = booleanPreferencesKey("extra_keys_visible")
     // 外观（应用层，与终端配色相互独立）：明暗模式 + 是否取系统壁纸动态色（Android 12+）。
     private val themeModeKey = stringPreferencesKey("theme_mode")
@@ -138,6 +143,14 @@ class SettingsStore(private val context: Context) {
         prefs[extraKeysVisibleKey] ?: true
     }
 
+    val quickShortcut: Flow<QuickShortcut> = context.settingsDataStore.data.map { prefs ->
+        QuickShortcut.fromName(prefs[quickShortcutKey])
+    }
+
+    suspend fun setQuickShortcut(shortcut: QuickShortcut) {
+        context.settingsDataStore.edit { it[quickShortcutKey] = shortcut.name }
+    }
+
     /** 应用明暗主题（默认跟随系统）。 */
     val themeMode: Flow<ThemeMode> = context.settingsDataStore.data.map { prefs ->
         ThemeMode.fromName(prefs[themeModeKey], ThemeMode.SYSTEM)
@@ -150,7 +163,7 @@ class SettingsStore(private val context: Context) {
 
     /** 终端软键盘模式（默认字符模式，与历史行为一致）。 */
     val keyboardMode: Flow<KeyboardMode> = context.settingsDataStore.data.map { prefs ->
-        KeyboardMode.fromName(prefs[keyboardModeKey], KeyboardMode.SECURE)
+        KeyboardMode.fromName(prefs[keyboardModeKey], KeyboardMode.IME)
     }
 
     /** 全屏程序内滑动语义（默认智能）。 */
