@@ -14,7 +14,8 @@ android {
         applicationId = "dev.lbh.remotework"
         minSdk = 24
         targetSdk = 35
-        versionCode = 6
+        // Keep the 0.1.5 behavior while allowing an in-place rollback from 0.1.7.
+        versionCode = 9
         versionName = "0.1.5"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
