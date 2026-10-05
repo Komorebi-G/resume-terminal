@@ -4,14 +4,14 @@
 
 ## 日常版本
 
-- 日常项目：`~/projects/juicessh`，分支 `resume/0.1.5-rollback`。
-- 原始 0.1.5：`5cd8341`，标签 `resume-v0.1.5`；只读对照工作树 `~/projects/juicessh-worktrees/0.1.5`。
-- 可覆盖安装的回退包：标签 `resume-v0.1.5-rollback` / 提交 `43290b2`。相对原始 0.1.5 只将 Android versionCode 从 6 改为 9，versionName 与功能仍为 0.1.5；日常分支后续只追加本归档说明。
-- 安装包：`~/Desktop/续端-0.1.5-回退版.apk`，包名 `dev.lbh.remotework.debug`，SHA256 `3a0fc3c8b963095b478c5d9542e0383d801483a9996ac3c84d2f323b2048c4ee`。
+- 日常项目：`~/projects/juicessh`，分支 `main`（原 `resume/0.1.5-rollback`）。2026-10-05 整理时统一分支名称，并纳入文字与框线修正；当前 versionCode 为 10，versionName 保持 0.1.5。
+- 原始 0.1.5：`5cd8341`，标签 `resume-v0.1.5`；闲置对照工作树已撤出，仍可从标签恢复。
+- 历史回退包：标签 `resume-v0.1.5-rollback` / 提交 `43290b2`。相对原始 0.1.5 只将 Android versionCode 从 6 改为 9，versionName 与功能仍为 0.1.5。
+- 历史回退包 SHA256：`3a0fc3c8b963095b478c5d9542e0383d801483a9996ac3c84d2f323b2048c4ee`。旧安装包保留在 `~/archive/projects/juicessh-local-2026-10-05/dist/`；最新包交付为 `~/Desktop/续端-0.1.5-最新版.apk`，包名 `dev.lbh.remotework.debug`。
 
 电脑继续使用普通 cmd / PowerShell / Windows Terminal / WSL；无需执行实验启动器。0.1.5 原有的手机 SSH、编辑器和手机持久终端功能保留，`remote-work` 仍是用户主动调用的可选工具，没有电脑自动接管 hook。
 
-当前 ADB 只连接测试模拟器，不能替用户确认手机已安装回退包。手机安装上述 APK 后使用原“续端”入口；独立接力实验 App 的安装不会替换原包。
+此前 ADB 验证使用测试模拟器，不能替用户确认手机已安装交付包。手机安装最新 APK 后使用原“续端”入口；独立接力实验 App 的安装不会替换原包。
 
 ## 保留的探索
 
@@ -31,13 +31,13 @@
 ```bash
 cd ~/projects/juicessh
 git worktree list
-git branch --list 'resume/*' 'archive/*'
+git branch --list main 'resume/*' 'archive/*'
 git show archive/native-session-2026-10-02:docs/NATIVE-SESSION.md
 
 # 按需重建某个历史工作树，不改变日常项目：
-git worktree add ~/projects/juicessh-worktrees/native-session archive/native-session-2026-10-02
-# 原始 0.1.5 的已有对照工作树：
-git -C ~/projects/juicessh-worktrees/0.1.5 log -1 --oneline
+git worktree add ~/archive/projects/juicessh-native-session archive/native-session-2026-10-02
+# 原始 0.1.5 的临时对照工作树：
+git worktree add --detach ~/archive/projects/juicessh-0.1.5-reference resume-v0.1.5
 ```
 
 如本地仓库丢失，可从归档中的 `repository.bundle` 克隆，再按上述分支重建工作树。归档根目录 `README.md`、`manifest.json` 和 `SHA256SUMS` 记录内容、校验与最终环境检查。

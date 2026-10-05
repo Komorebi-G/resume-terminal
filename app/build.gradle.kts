@@ -14,8 +14,8 @@ android {
         applicationId = "dev.lbh.remotework"
         minSdk = 24
         targetSdk = 35
-        // Keep the 0.1.5 behavior while allowing an in-place rollback from 0.1.7.
-        versionCode = 9
+        // Keep the 0.1.5 baseline; increment for the terminal rendering fix APK.
+        versionCode = 10
         versionName = "0.1.5"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }

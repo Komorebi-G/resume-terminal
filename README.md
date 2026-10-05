@@ -1,6 +1,6 @@
 # 续端 · Resume Terminal
 
-当前日常基线为未加入同步终端的 **0.1.5**。后续同步与接力探索已停止并归档，版本、安装包和历史工作树入口见 [归档说明](docs/ARCHIVE.md)。
+当前日常基线为未加入同步终端的 **0.1.5**，包含终端文字与框线间距修正（versionCode 10）。日常开发统一在 `main` 分支。后续同步与接力探索已停止并归档，历史版本入口见 [归档说明](docs/ARCHIVE.md)。
 
 **续端是基于 [Moke（briqt/moke）](https://github.com/briqt/moke) 改进的个人使用习惯特化分支，并非完全原创项目，也不是 Moke 官方版本。** 原有 Android 客户端、主要界面和 SSH / mosh 基础能力来自 Moke；原作者的工作和版权声明予以保留。
 
@@ -72,6 +72,12 @@ remote-work --list
 调试包 ID 为 `dev.lbh.remotework.debug`，不会覆盖 Moke。后续覆盖安装需使用同一签名。自行构建的 debug 包使用各自机器的调试签名，与其他人构建的包可能无法直接覆盖安装。当前为开发版本。
 
 实际通过的验证与未完成项见 [质量与验收](docs/QUALITY.md)。小米真机手感需要在手机上验证，不能由 JVM 测试替代。
+
+## 工作区
+
+`app/` 是 Android 客户端，`terminal-emulator/` 是终端引擎，`terminal-view/` 是终端视图；三个目录都是构建所需的源码模块。`scripts/` 放构建和验证工具，`wsl/` 保留旧安装入口兼容，`docs/` 集中存放说明和 [更新记录](docs/CHANGELOG.md)。上游历史说明与截图放在 `docs/upstream/`。
+
+旧 APK、本机日志和个人连接记录移出日常工作区，构建缓存可重新生成。目录用途、清理与历史工作树恢复见 [工作区说明](docs/WORKSPACE.md)。
 
 ## 来源、许可与反馈
 

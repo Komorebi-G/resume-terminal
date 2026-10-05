@@ -1,5 +1,7 @@
 # Contributing to Moke
 
+> Archived upstream guide. Current Resume Terminal conventions are in [the fork guide](../../.github/CONTRIBUTING.md).
+
 **English** · [简体中文](CONTRIBUTING.zh-CN.md)
 
 ## How to report
@@ -30,4 +32,4 @@ Please file bugs or suggestions via [issues](https://github.com/briqt/moke/issue
 
 ## License
 
-By contributing, you agree that your changes are licensed under **GPL-3.0-or-later**, the same license as this project (see [LICENSE](LICENSE)).
+By contributing, you agree that your changes are licensed under **GPL-3.0-or-later**, the same license as this project (see [LICENSE](../../LICENSE)).

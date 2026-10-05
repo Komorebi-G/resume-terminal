@@ -1,5 +1,7 @@
 # 参与 Moke
 
+> 上游历史指南。续端当前约定见[本分支指南](../../.github/CONTRIBUTING.md)。
+
 [English](CONTRIBUTING.md) · **简体中文**
 
 ## 反馈方式
@@ -30,4 +32,4 @@
 
 ## 许可
 
-提交贡献即表示同意你的改动以 **GPL-3.0-or-later** 授权（与本项目一致，见 [LICENSE](LICENSE)）。
+提交贡献即表示同意你的改动以 **GPL-3.0-or-later** 授权（与本项目一致，见 [LICENSE](../../LICENSE)）。
