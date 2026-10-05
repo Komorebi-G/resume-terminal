@@ -22,8 +22,9 @@ public final class TerminalRenderer {
     final Typeface mTypeface;
     private final Paint mTextPaint = new Paint();
 
-    /** The width of a single mono spaced character obtained by {@link Paint#measureText(String)} on a single 'X'. */
+    /** Terminal cell width: the monospace glyph advance plus the requested letter spacing. */
     final float mFontWidth;
+    private final float mGlyphWidth;
     /** The {@link Paint#getFontSpacing()}. See http://www.fampennings.nl/maarten/android/08numgrid/font.png */
     final int mFontLineSpacing;
     /** The {@link Paint#ascent()}. See http://www.fampennings.nl/maarten/android/08numgrid/font.png */
@@ -39,7 +40,7 @@ public final class TerminalRenderer {
 
     /**
      * moke 扩展：额外的行距倍数 [lineSpacingMul]（1.0=字体自然行距）与字间距 [letterSpacingEm]（em，0=正常）。
-     * 二者仅缩放 {@link #mFontLineSpacing} / 影响 {@link #mFontWidth}，其余渲染逻辑不变（默认值等价上游）。
+     * 字距同时进入网格宽度，保证文字、光标、选区与远端列数使用同一几何尺寸。
      */
     public TerminalRenderer(int textSize, Typeface typeface, float lineSpacingMul, float letterSpacingEm) {
         mTextSize = textSize;
@@ -53,7 +54,10 @@ public final class TerminalRenderer {
         mFontLineSpacing = (int) Math.ceil(mTextPaint.getFontSpacing() * lineSpacingMul);
         mFontAscent = (int) Math.ceil(mTextPaint.ascent());
         mFontLineSpacingAndAscent = mFontLineSpacing + mFontAscent;
-        mFontWidth = mTextPaint.measureText("X");
+        // Android excludes letter spacing from a single glyph's measured advance.
+        // Measuring only X used to leave the grid unchanged while longer runs spread out.
+        mGlyphWidth = mTextPaint.measureText("X");
+        mFontWidth = Math.max(1f, mGlyphWidth + textSize * letterSpacingEm);
 
         StringBuilder sb = new StringBuilder(" ");
         for (int i = 0; i < asciiMeasures.length; i++) {
@@ -100,7 +104,6 @@ public final class TerminalRenderer {
             int lastRunStartIndex = 0;
             boolean lastRunFontWidthMismatch = false;
             int currentCharIndex = 0;
-            float measuredWidthForRun = 0.f;
 
             for (int column = 0; column < columns; ) {
                 final char charAtIndex = line[currentCharIndex];
@@ -115,10 +118,11 @@ public final class TerminalRenderer {
                 // Check if the measured text width for this code point is not the same as that expected by wcwidth().
                 // This could happen for some fonts which are not truly monospace, or for more exotic characters such as
                 // smileys which android font renders as wide.
-                // If this is detected, we draw this code point scaled to match what wcwidth() expects.
+                // Isolate mismatches so each glyph can be fitted to the cells wcwidth() expects.
                 final float measuredCodePointWidth = (codePoint < asciiMeasures.length) ? asciiMeasures[codePoint] : mTextPaint.measureText(line,
                     currentCharIndex, charsForCodePoint);
-                final boolean fontWidthMismatch = Math.abs(measuredCodePointWidth / mFontWidth - codePointWcWidth) > 0.01;
+                final boolean fontWidthMismatch = Math.abs(measuredCodePointWidth / mGlyphWidth - codePointWcWidth) > 0.01
+                    || TerminalBoxDrawing.supports(codePoint);
 
                 if (style != lastRunStyle || insideCursor != lastRunInsideCursor || insideSelection != lastRunInsideSelection || fontWidthMismatch || lastRunFontWidthMismatch) {
                     if (column == 0) {
@@ -132,10 +136,9 @@ public final class TerminalRenderer {
                             invertCursorTextColor = true;
                         }
                         drawTextRun(canvas, line, palette, heightOffset, lastRunStartColumn, columnWidthSinceLastRun,
-                            lastRunStartIndex, charsSinceLastRun, measuredWidthForRun,
+                            lastRunStartIndex, charsSinceLastRun,
                             cursorColor, cursorShape, lastRunStyle, reverseVideo || invertCursorTextColor || lastRunInsideSelection);
                     }
-                    measuredWidthForRun = 0.f;
                     lastRunStyle = style;
                     lastRunInsideCursor = insideCursor;
                     lastRunInsideSelection = insideSelection;
@@ -143,7 +146,6 @@ public final class TerminalRenderer {
                     lastRunStartIndex = currentCharIndex;
                     lastRunFontWidthMismatch = fontWidthMismatch;
                 }
-                measuredWidthForRun += measuredCodePointWidth;
                 column += codePointWcWidth;
                 currentCharIndex += charsForCodePoint;
                 while (currentCharIndex < charsUsedInLine && WcWidth.width(line, currentCharIndex) <= 0) {
@@ -161,12 +163,12 @@ public final class TerminalRenderer {
                 invertCursorTextColor = true;
             }
             drawTextRun(canvas, line, palette, heightOffset, lastRunStartColumn, columnWidthSinceLastRun, lastRunStartIndex, charsSinceLastRun,
-                measuredWidthForRun, cursorColor, cursorShape, lastRunStyle, reverseVideo || invertCursorTextColor || lastRunInsideSelection);
+                cursorColor, cursorShape, lastRunStyle, reverseVideo || invertCursorTextColor || lastRunInsideSelection);
         }
     }
 
     private void drawTextRun(Canvas canvas, char[] text, int[] palette, float y, int startColumn, int runWidthColumns,
-                             int startCharIndex, int runWidthChars, float mes, int cursor, int cursorStyle,
+                             int startCharIndex, int runWidthChars, int cursor, int cursorStyle,
                              long textStyle, boolean reverseVideo) {
         int foreColor = TextStyle.decodeForeColor(textStyle);
         final int effect = TextStyle.decodeEffect(textStyle);
@@ -198,16 +200,6 @@ public final class TerminalRenderer {
         float left = startColumn * mFontWidth;
         float right = left + runWidthColumns * mFontWidth;
 
-        mes = mes / mFontWidth;
-        boolean savedMatrix = false;
-        if (Math.abs(mes - runWidthColumns) > 0.01) {
-            canvas.save();
-            canvas.scale(runWidthColumns / mes, 1.f);
-            left *= mes / runWidthColumns;
-            right *= mes / runWidthColumns;
-            savedMatrix = true;
-        }
-
         if (backColor != palette[TextStyle.COLOR_INDEX_BACKGROUND]) {
             // Only draw non-default background.
             mTextPaint.setColor(backColor);
@@ -217,9 +209,10 @@ public final class TerminalRenderer {
         if (cursor != 0) {
             mTextPaint.setColor(cursor);
             float cursorHeight = mFontLineSpacingAndAscent - mFontAscent;
+            float cursorRight = right;
             if (cursorStyle == TerminalEmulator.TERMINAL_CURSOR_STYLE_UNDERLINE) cursorHeight /= 4.;
-            else if (cursorStyle == TerminalEmulator.TERMINAL_CURSOR_STYLE_BAR) right -= ((right - left) * 3) / 4.;
-            canvas.drawRect(left, y - cursorHeight, right, y, mTextPaint);
+            else if (cursorStyle == TerminalEmulator.TERMINAL_CURSOR_STYLE_BAR) cursorRight = left + (right - left) / 4f;
+            canvas.drawRect(left, y - cursorHeight, cursorRight, y, mTextPaint);
         }
 
         if ((effect & TextStyle.CHARACTER_ATTRIBUTE_INVISIBLE) == 0) {
@@ -241,11 +234,26 @@ public final class TerminalRenderer {
             mTextPaint.setStrikeThruText(strikeThrough);
             mTextPaint.setColor(foreColor);
 
-            // The text alignment is the default Paint.Align.LEFT.
-            canvas.drawTextRun(text, startCharIndex, runWidthChars, startCharIndex, runWidthChars, left, y - mFontLineSpacingAndAscent, false, mTextPaint);
+            if (runWidthChars == 1 && TerminalBoxDrawing.supports(text[startCharIndex])) {
+                TerminalBoxDrawing.draw(canvas, mTextPaint, text[startCharIndex], left,
+                    y - mFontLineSpacing, right, y, mTextSize, bold);
+            } else {
+                // Keep narrow CJK/fallback glyphs at their natural proportions, centered
+                // in their cells. Only oversized glyphs need shrinking to preserve columns.
+                // Measure the complete run so letter spacing and combining marks agree
+                // with Android's shaping rather than a sum of individual advances.
+                float textWidth = mTextPaint.measureText(text, startCharIndex, runWidthChars);
+                float cellWidth = right - left;
+                float scale = textWidth > cellWidth && textWidth > 0f ? cellWidth / textWidth : 1f;
+                float textLeft = left + (cellWidth - textWidth * scale) / 2f;
+                canvas.save();
+                canvas.translate(textLeft, y - mFontLineSpacingAndAscent);
+                canvas.scale(scale, 1f);
+                canvas.drawTextRun(text, startCharIndex, runWidthChars, startCharIndex,
+                    runWidthChars, 0f, 0f, false, mTextPaint);
+                canvas.restore();
+            }
         }
-
-        if (savedMatrix) canvas.restore();
     }
 
     public float getFontWidth() {
